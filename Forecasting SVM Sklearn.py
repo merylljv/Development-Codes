@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, date, time, timedelta
 import pandas as pd
 from pandas.stats.api import ols
@@ -13,6 +14,22 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.cross_validation import train_test_split
 from sklearn.grid_search import GridSearchCV
 from matplotlib.patches import Rectangle
+
+path = os.path.abspath('C:\Users\Win8\Documents\Dynaslope\Data Analysis\updews-pycodes\Analysis')
+if not path in sys.path:
+    sys.path.insert(1,path)
+
+from querySenslopeDb import *
+
+def GetGroundDF():
+    try:
+
+        query = 'SELECT timestamp, meas_type, site_id, crack_id, observer_name, meas, weather, reliability FROM gndmeas'
+        
+        df = GetDBDataFrame(query)
+        return df
+    except:
+        raise ValueError('Could not get sensor list from database')
 
 def svm_regression(x,y,C,gamma):
     clf = svm.SVR(C = C, gamma = gamma,epsilon = 0.005)
@@ -47,23 +64,23 @@ def out_in_data(x,y):
         z.append(y[i])
     return z
 
-
 method1 = 'mean'
 method2 = 'mean'
-site = 'Nin'
-crack = 'Crack B'
+site = 'msl'
+crack = 'B'
 steps_fwd = 5
 size = 2
 sample_size = str(size)+'D' 
+raw_data = GetGroundDF()
+raw_data.set_index(['timestamp'],inplace = True)
+raw_data['site_id'] = map(lambda x: x.lower(),raw_data['site_id'])
+raw_data['crack_id'] = map(lambda x: x.title(),raw_data['crack_id'])
+raw_data=raw_data[raw_data['meas']!=np.nan]
+raw_data=raw_data[raw_data['site_id']!=' ']
 
-raw_data = pd.read_csv('C:\Users\Win8\Documents\Dynaslope\Data Analysis\\data.csv', parse_dates=['timestamp'],index_col=0)
-raw_data=raw_data[raw_data['disp']!=np.nan]
-raw_data=raw_data[raw_data['Site id']!=' ']
-raw_data=raw_data[raw_data['id']!=np.nan]
-raw_data=raw_data.dropna(subset=['disp'])
-
-data = raw_data[raw_data['Site id']==site]
-data = data.loc[data.id == crack,['disp']]
+raw_data=raw_data.dropna(subset=['meas'])
+data = raw_data[raw_data['site_id']==site]
+data = data.loc[data.crack_id == crack,['meas']]
 data.sort_index(inplace = True)
 
 
@@ -73,7 +90,7 @@ data['tvalue'] = data.index
 data['delta'] = (data['tvalue']-data.index[0])
 data = data.drop_duplicates()
 data['t'] = data['delta'].apply(lambda x: x  / np.timedelta64(1,'D'))
-data['x'] = (data['disp']-np.array(data['disp'])[0])/100
+data['x'] = (data['meas']-np.array(data['meas'])[0])/100
 data2 = data
 data3 = data
 
