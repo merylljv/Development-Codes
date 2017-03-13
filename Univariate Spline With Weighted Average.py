@@ -8,6 +8,8 @@ from scipy.interpolate import UnivariateSpline
 from scipy.signal import gaussian
 from scipy.ndimage import filters
 
+#### Function univ_spline based on the following reference:
+#### http://www.nehalemlabs.net/prototype/blog/2014/04/12/how-to-fix-scipys-interpolating-spline-default-behavior/
 
 def moving_average(series,sigma = 3):
     #### Moving weighted gaussian average with window = 39
@@ -54,4 +56,4 @@ def demo():
     ax3.set_title('Second Derivative')
     
     plt.show()
-    
+

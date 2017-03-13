@@ -7,6 +7,11 @@ from scipy import stats
 import numpy as np
 import pandas as pd
 
+#### Confidence interval computations based on the following wiki article
+#### https://en.wikipedia.org/wiki/Simple_linear_regression
+#### See section 'Confidence Intervals'
+
+
 
 def sum_square_residual(x,y,slope,intercept):
     #### Computes the sum of the square of the residual of the linear regression
