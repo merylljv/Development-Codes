@@ -10,6 +10,9 @@ from scipy import signal
 from scipy.optimize import minimize
 from scipy.ndimage import filters
 
+#### Impulse Response Function based on 
+#### "The application of an innovative inverse model for understanding and predicting landslide movements Belle, Anunay et. al 2014"
+
 def step_fcn(t,A,d):
     return np.where(np.logical_and(t>=0,t<=d),1,0)*A
 
@@ -27,7 +30,7 @@ def exp2(t,L):
 
 def transfer_function(n,T,D,L):
     t = np.arange(0,n)
-    return filters.convolve1d(exp1(t,T,D),exp2(t,L)/exp2(t,L))
+    return filters.convolve1d(exp1(t,T,D),exp2(t,L))
 
 def model_output_signal(trans,input_signal,A):
     return A*filters.convolve1d(input_signal,trans)
@@ -36,6 +39,7 @@ def optimize_fun(par,input_signal,output_signal,n):
     trans = transfer_function(n,par[0],par[1],par[2])
     predicted = model_output_signal(trans,input_signal,par[3])
     return RMSE(predicted,output_signal)
+    
 def demo():
     ###MAIN
     ###Use SLSQP to obtain transfer function
@@ -55,11 +59,11 @@ def demo():
     ### Starting parameters
     T = 13 #### Lag in acceleration phasse
     D = 45 #### Duration of the acceleration phase
-    L = 1 #### Recession constant
+    L = 1  #### Recession constant
     A = 2/5. ### Normalization constant 
     
     
-    res = minimize(optimize_fun,(T,D,L,A),args = (test_input,test_output,n),method = 'SLSQP',bounds = bnds)
+    res = minimize(optimize_fun,(T,D,L,A),args = (test_input,test_output,n),method = 'SLSQP',bounds = bnds,options = {'maxiter':1000})
     
     ####Optimized transfer function
     print res
