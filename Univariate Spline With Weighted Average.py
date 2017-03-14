@@ -11,16 +11,29 @@ from scipy.ndimage import filters
 #### Function univ_spline based on the following reference:
 #### http://www.nehalemlabs.net/prototype/blog/2014/04/12/how-to-fix-scipys-interpolating-spline-default-behavior/
 
+def GoodnessOfSplineFit(x,y,sp):
+    #### Calculate sum of square residuals, coeffient of determination, and root mean square of spline fit
+    mean = np.mean(y)
+    n = float(len(y))
+    SS_tot = np.sum(np.power(y-mean,2))
+    SS_res = np.sum(np.power(y-sp(x),2))
+    coef_determination = 1 - SS_res/SS_tot
+    RMSE = np.sqrt(SS_res/n)
+    
+    return SS_res,coef_determination,RMSE    
+
 def moving_average(series,sigma = 3):
     #### Moving weighted gaussian average with window = 39
     b = gaussian(39,sigma)
     average = filters.convolve1d(series,b/b.sum())
     var = filters.convolve1d(np.power(series-average,2),b/b.sum())
+    
     return average,var
 
 def univ_spline(x,y):
     #### Univariate spline with weights corresponding to variance at each point
     _,var = moving_average(y)
+    
     return UnivariateSpline(x,y,w = 1/np.sqrt(var))
 
 def demo():
@@ -54,6 +67,10 @@ def demo():
     ax3 = fig.add_subplot(224)
     ax3.plot(x,y_2_der)
     ax3.set_title('Second Derivative')
+    
+    SS_res,r2,RMSE = GoodnessOfSplineFit(x,y,sp)
+    
+    print "Spline fit evaluation:\n\nSum of square residuals = {}\nCoefficient of determination (r^2) = {}\nRoot-mean square error = {}".format(SS_res,r2,RMSE)    
     
     plt.show()
 

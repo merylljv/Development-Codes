@@ -13,6 +13,11 @@ from datetime import date, time, datetime, timedelta
 from scipy.stats import spearmanr
 import sys
 
+from scipy.interpolate import UnivariateSpline
+from scipy.signal import gaussian
+from scipy.ndimage import filters
+
+
 #### Include Analysis folder of updews-pycodes (HARD CODED!!)
 path = os.path.abspath("C:\Users\Win8\Documents\Dynaslope\Data Analysis\updews-pycodes\Analysis")
 if not path in sys.path:
@@ -43,7 +48,8 @@ plasma = cm.colors
 
 #### Hard Coded Parameters:
 event_window = pd.Timedelta(30,'D')
-colpos_interval = 7 ### in days
+colpos_interval = 1 ### in days
+window = 3 ### in days
 
 
 def remove_overlap(ranges):
@@ -66,6 +72,21 @@ def remove_overlap(ranges):
             current_stop = max(current_stop, stop)
 
     return result
+
+def moving_average(series,sigma = 3):
+    b = gaussian(39,sigma)
+    average = filters.convolve1d(series,b/b.sum())
+    var = filters.convolve1d(np.power(series-average,2),b/b.sum())
+    return average,var
+
+def GoodnessOfSplineFit(x,y,sp):
+    mean = np.mean(y)
+    n = float(len(y))
+    SS_tot = np.sum(np.power(y-mean,2))
+    SS_res = np.sum(np.power(y-sp(x),2))
+    coef_determination = 1 - SS_res/SS_tot
+    RMSE = np.sqrt(SS_res/n)
+    return SS_res,coef_determination,RMSE    
 
 def CheckIfEventIsValid(candidate_triggers):
     query = "SELECT * FROM senslopedb.site_level_alert WHERE source = 'public' AND alert != 'A0' AND alert != 'A1' ORDER BY updateTS desc"
@@ -685,7 +706,68 @@ def PlotCumShearMutipleSites(disp_list,nodes_list,name_list):
     #### Set major axis label for interactive mode
     ax.xaxis.set_major_formatter(md.DateFormatter('%m/%d/%y %H:%M'))
     
+def GetCumShearDF(disp,nodes):
+    #### Select only relevant nodes
+    mask = np.zeros(len(disp.id.values))
+    for values in nodes:
+        mask = np.logical_or(mask,disp.id.values == values)
+    disp = disp[mask]
+    
+    #### Set initial displacements to zero
+    disp_id = disp.groupby('id',as_index = False)
+    disp = disp_id.apply(set_zero_disp)    
+    
+    #### Compute Shear Displacements
+    disp_ts = disp.groupby('ts',as_index = True)
+    return disp_ts.apply(ComputeCumShear).reset_index(drop = True).set_index('ts')
 
+def PlotInterpolation(disp,nodes,name,window):
+    #### Get cumshear df
+    cumsheardf = GetCumShearDF(disp,nodes)
+    
+    #### Compute for time delta values
+    cumsheardf['time'] = (cumsheardf.index - cumsheardf.index[0]).apply(lambda x: x / np.timedelta64(1,'D'))
+    
+    #### Convert displacement to centimeters
+    cumsheardf['cumshear'] = cumsheardf.cumshear.apply(lambda x:x*100)
+    
+    
+    #### Get last timestamp in df
+    last_ts = cumsheardf.timestamp.values[-1]        
+    
+    #### Set bounds of slice df according to window
+    for ts_start in cumsheardf[cumsheardf.timestamp <= last_ts - window].timestamp.values:
+        
+        #### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        disp = slicedf.cumshear.values
+        
+        #### Commence interpolation
+        try:
+            #### Take the gaussian average of data points and its variance
+            _,var = moving_average(disp)
+            sp = UnivariateSpline(time_delta,disp,w=1/np.sqrt(var))
+            
+            #### Use 10000 points for interpolation
+            time_int = np.linspace(time_delta[0],time_delta[-1],10000)
+            
+            #### Spline interpolation values    
+            disp_int = sp(time_int)
+            vel_int = sp.derivative(n=1)(time_int)
+            acc_int = sp.derivative(n=2)(time_int)
+            
+            #### Compute for goodness of fit values
+            
+        except:
+            print "Interpolation Error"
+            
+        
     
         
 
