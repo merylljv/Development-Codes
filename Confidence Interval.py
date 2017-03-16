@@ -23,9 +23,10 @@ def t_crit(confidence_level,n):
     gamma = 1 - confidence_level
     return stats.t.ppf(1-gamma/2.,n)
 
-def uncertainty(x,y,slope,intercept,confidence_level):
+def uncertainty(x,y,slope,intercept,confidence_level,x_array = None):
     #### INPUT
-    # Experimental x & y values should have the same length (array)
+    # x,y -> Experimental x & y values should have the same length (array)
+    # Input x_array to evaluate uncertainty at the specified array
     # Computed slope & intercept (float)
     #### OUTPUT
     # Uncertainty on the prediction of simple linear regression
@@ -35,8 +36,10 @@ def uncertainty(x,y,slope,intercept,confidence_level):
     sum_epsilon_square = sum_square_residual(x,y,slope,intercept)
     mean_x = np.mean(x)
     var_x = np.sum(np.square(x - mean_x))
-    
-    return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+    if x_array == None:
+        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+    else:
+        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x_array - mean_x)**2/var_x)))
 
 def confidence_interval_upper(x,y,slope,intercept,confidence_level):
     #### Computes for the upper bound values of the confidence interval
