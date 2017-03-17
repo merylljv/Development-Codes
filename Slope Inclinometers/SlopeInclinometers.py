@@ -1095,7 +1095,7 @@ def PlotThresholdLinePerSite(threshold_file):
         a = threshold_df[threshold_df.sensor == sensor].acceleration.values
         
         #### Plot corresponding values        
-        ## Enlarge marker size if star
+        ## Adjust marker sizes according to shape
         if marker_type[plot_num%6] == '*' or marker_type[plot_num%6] == 'H':
             size = 8.5
         elif marker_type[plot_num%6] == 'o':
@@ -1144,6 +1144,7 @@ def PlotThresholdLinePerSite(threshold_file):
     if not os.path.exists(save_path+'/'):
         os.makedirs(save_path+'/')    
     
+    #### Get datetime now to add to filename label
     now = pd.to_datetime(datetime.now())
     
     #### Save figure
