@@ -49,10 +49,12 @@ plasma = cm.colors
 
 
 #### Hard Coded Parameters:
+### Use 30 days for colpos and disp analysis or 3 days for velocity analysis
+vel_event_window = pd.Timedelta(3,'D')
 event_window = pd.Timedelta(30,'D')
 colpos_interval = 1 ### in days
 window = 3 ### in days
-window = pd.Timedelta(window,'d')
+window = pd.Timedelta(window,'D')
 threshold_file = 'threshold.csv'
 
 def remove_overlap(ranges):
@@ -189,9 +191,16 @@ def site_events_to_plot(candidate_triggers):
 
 def sensor_columns_to_plot(site_events):
     for timestamp,site in site_events[['timestamp','site']].values:
-        query = "SELECT DISTINCT site FROM senslopedb.node_level_alert WHERE timestamp >= '{}' AND timestamp <= '{}' AND site LIKE '{}%'".format(timestamp[0].strftime("%Y-%m-%d %H:%M:%S"),timestamp[1].strftime("%Y-%m-%d %H:%M:%S"),site)
+        query = "SELECT DISTINCT site, id FROM senslopedb.node_level_alert WHERE timestamp >= '{}' AND timestamp <= '{}' AND site LIKE '{}%'".format(timestamp[0].strftime("%Y-%m-%d %H:%M:%S"),timestamp[1].strftime("%Y-%m-%d %H:%M:%S"),site)
         sensor_columns = q.GetDBDataFrame(query)
-        site_events.loc[(site_events.timestamp == timestamp)&(site_events.site == site),['sensor_columns']] = ', '.join(sensor_columns['site'].values)
+        site_events.loc[(site_events.timestamp == timestamp)&(site_events.site == site),['sensor_columns']] = ', '.join(np.unique(sensor_columns['site'].values))
+        nodes = ''
+        for column in np.unique(sensor_columns['site'].values):
+            nodes = nodes + '[' + ','.join(map(lambda x:str(x),np.unique(sensor_columns[sensor_columns.site == column].id.values))) + ']'
+            if column != np.unique(sensor_columns['site'].values)[-1]:
+                nodes = nodes + ', '
+        site_events.loc[(site_events.timestamp == timestamp)&(site_events.site == site),['nodes']] = nodes
+        
     return site_events
 
 def set_zero_disp(colposdf):
@@ -201,7 +210,7 @@ def set_zero_disp(colposdf):
     
     return colposdf
 
-def SubsurfaceValidEvents():
+def SubsurfaceValidEvents(vel = False):
     #### This function gets all valid L2/L3 subsurface events then outputs the appropriate start and end timestamp for each site and relevant sensor columns
     
     #### Obtain from site level alerts all L2/L3 candidate triggers
@@ -211,19 +220,25 @@ def SubsurfaceValidEvents():
     #### Filter invalid alerts
     candidate_triggers = CheckIfEventIsValid(candidate_triggers)
     
-    #### Set initial and final plotting timestamp
-    candidate_triggers['timestamp_start'] = map(lambda x:x - event_window,candidate_triggers['timestamp'])
-    candidate_triggers['timestamp_end'] = map(lambda x:x + event_window,candidate_triggers['updateTS'])
+    #### Set initial and final plotting timestamp depending on mode
+    if not(vel):
+        candidate_triggers['timestamp_start'] = map(lambda x:x - event_window,candidate_triggers['timestamp'])
+        candidate_triggers['timestamp_end'] = map(lambda x:x + event_window,candidate_triggers['updateTS'])
+    else:
+        candidate_triggers['timestamp_start'] = map(lambda x:x - vel_event_window - window,candidate_triggers['timestamp'])
+        candidate_triggers['timestamp_end'] = map(lambda x:x + vel_event_window,candidate_triggers['updateTS'])
+
     
     #### Remove overlaps and merge timestamps per site
     candidate_triggers_group = candidate_triggers.groupby(['site'],as_index = False)
     site_events = candidate_triggers_group.apply(site_events_to_plot)
     
-    #### Determine columns to plot
+    #### Determine columns to plot and nodes to check
     site_events['sensor_columns'] = None
-    return sensor_columns_to_plot(site_events).reset_index()[['timestamp','site','sensor_columns']]
+    site_events['nodes'] = None
+    return sensor_columns_to_plot(site_events).reset_index()[['timestamp','site','sensor_columns','nodes']]
     
-def GetDispAndColPosDataFrame(event_timestamp,sensor_column):
+def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False):
     #### Get all required parameters from realtime plotter
     col = q.GetSensorList(sensor_column)
     window, config = rtw.getwindow(pd.to_datetime(event_timestamp[-1]))
@@ -231,7 +246,7 @@ def GetDispAndColPosDataFrame(event_timestamp,sensor_column):
     window.offsetstart = window.start - timedelta(days=(config.io.num_roll_window_ops*window.numpts-1)/48.)
     config.io.col_pos_interval = str(int(colpos_interval)) + 'D'
     config.io.num_col_pos = int((window.end - window.start).days/colpos_interval + 1)
-    monitoring = gp.genproc(col[0], window, config, config.io.column_fix,comp_vel = False)
+    monitoring = gp.genproc(col[0], window, config, config.io.column_fix,comp_vel = compute_vel)
     
     #### Get colname, num nodes and segment length
     num_nodes = monitoring.colprops.nos
