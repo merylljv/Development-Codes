@@ -22,9 +22,9 @@ def GoodnessOfSplineFit(x,y,sp):
     
     return SS_res,coef_determination,RMSE    
 
-def moving_average(series,sigma = 3):
+def moving_average(series,sigma = 3,window_time = 39):
     #### Moving weighted gaussian average with window = 39
-    b = gaussian(39,sigma)
+    b = gaussian(window_time,sigma)
     average = filters.convolve1d(series,b/b.sum())
     var = filters.convolve1d(np.power(series-average,2),b/b.sum())
     

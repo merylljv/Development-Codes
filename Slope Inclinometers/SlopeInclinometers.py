@@ -796,11 +796,11 @@ def PlotInterpolation(disp,nodes,name,window):
     #### Set bounds of slice df according to window
     for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
 
-        #### Resume run
-        if fig_num <= 5752:
-            print "Skipping frame {:04d}".format(fig_num)
-            fig_num+=1
-            continue
+#        #### Resume run
+#        if fig_num <= 5752:
+#            print "Skipping frame {:04d}".format(fig_num)
+#            fig_num+=1
+#            continue
         
         #### Set end ts according to window        
         ts_end = ts_start + window
@@ -1166,6 +1166,75 @@ def PlotThresholdLinePerSite(threshold_file):
     plt.savefig('{}/Velocity vs Acceleration Threshold Line Per Site {}.png'.format(save_path,now.strftime("%Y-%m-%d_%H-%M")),
             dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
+def PlotVeocityComparison(disp,name,nodes,window):
+    #### Get cumshear df
+    cumsheardf = GetCumShearDF(disp,nodes)
     
+    #### Compute for time delta values
+    cumsheardf['time'] = map(lambda x: x / np.timedelta64(1,'D'),cumsheardf.index - cumsheardf.index[0])
     
+    #### Convert displacement to centimeters
+    cumsheardf['cumshear'] = cumsheardf.cumshear.apply(lambda x:x*100)
     
+    #### Initialize velocity computation data
+    cumsheardf['spline'] = None
+    cumsheardf['ols'] = None
+    cumsheardf['back'] = None
+    cumsheardf['center'] = None
+    cumsheardf['average'] = None
+    
+    #### Get last timestamp in df
+    last_ts = cumsheardf.index[-1]        
+    
+    #### Set figure number    
+    fig_num = 1
+    
+    #### Set bounds of slice df according to window
+    for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
+
+#        #### Resume run
+#        if fig_num <= 5752:
+#            print "Skipping frame {:04d}".format(fig_num)
+#            fig_num+=1
+#            continue
+        
+        #### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        disp = slicedf.cumshear.values
+        
+        #### Commence interpolation
+        try:
+            #### Take the gaussian average of data points and its variance
+            _,var = moving_average(disp)
+            sp = UnivariateSpline(time_delta,disp,w=1/np.sqrt(var))
+            
+            #### Use 10000 points for interpolation
+            time_int = np.linspace(time_delta[0],time_delta[-1],10000)
+            
+            #### Spline interpolation values    
+            disp_int = sp(time_int)
+            vel_int = sp.derivative(n=1)(time_int)
+            
+            #### Compute for goodness of fit values
+            SS_res, r2, RMSE = GoodnessOfSplineFit(time_delta,disp,sp)            
+            
+        except:
+            print "Interpolation Error {}".format(pd.to_datetime(str(time_delta[-1])).strftime("%m/%d/%Y %H:%M"))
+            disp_int = np.ones(len(time_int))*np.nan
+            vel_int = np.ones(len(time_int))*np.nan
+        
+        #### Perform velocity computations using different methods
+        
+        #### Method 1: From spline interpolation
+        vel_spline = vel_int[-1]
+        
+        #### Method 2: From ordinary least squares
+        slope, intercept, r_value, p_value, std_err = stats.linregress(disp[-7:])
+        
+        
