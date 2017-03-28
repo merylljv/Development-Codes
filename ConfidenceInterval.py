@@ -64,32 +64,36 @@ def confidence_interval_lower(x,y,slope,intercept,confidence_level,interval = 'c
     delta = uncertainty(x,y,slope,intercept,confidence_level,interval)
     return slope*x + intercept - delta
 
-def slope_unc(x,y,slope,intercept,interval = 'confidence'):
+def slope_unc(x,y,slope,intercept,confidence_level,interval = 'confidence'):
     #### Computes for the uncertainty of the measurement of slope for specified type of interval
     #### x,y - data points
     #### slope, intercept - linear regression results
+    #### confidence_level - specified confidence level
     #### interval - choose from confidence or prediction
 
     MSE = 1 / float(len(x) - 2) * sum_square_residual(x,y,slope,intercept)
+    t = t_crit(confidence_level,len(x)-2)
     if interval == 'confidence':
-        return np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)))
+        return t*np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)))
     elif interval == 'prediction':
-        return np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)) + MSE)
+        return t*np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)) + MSE)
     else:
         print "Invalid type of interval"
         raise ValueError
 
-def intercept_unc(x,y,slope,intercept,interval = 'confidence'):
+def intercept_unc(x,y,slope,intercept,confidence_level,interval = 'confidence'):
     #### Computes for the uncertainty of the measurement of intercept for specified type of interval
     #### x,y - data points
     #### slope, intercept - linear regression results
     #### interval - choose from confidence or prediction    
 
     MSE = 1 / float(len(x) - 2) * sum_square_residual(x,y,slope,intercept)
+    t = t_crit(confidence_level,len(x)-2)
+
     if interval == 'confidence':
-        return np.sqrt(MSE * (1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
+        return t*np.sqrt(MSE * (1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
     elif interval == 'prediction':
-        return np.sqrt(MSE * (1 + 1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
+        return t*np.sqrt(MSE * (1 + 1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
     else:
         print "Invalid type of interval"
         raise ValueError
