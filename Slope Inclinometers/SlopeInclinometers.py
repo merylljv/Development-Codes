@@ -17,7 +17,7 @@ from scipy.interpolate import UnivariateSpline
 from scipy.signal import gaussian
 from scipy.ndimage import filters
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
-
+from matplotlib.legend_handler import HandlerLine2D
 #### Include Analysis folder of updews-pycodes (HARD CODED!!)
 path = os.path.abspath("C:\Users\Win8\Documents\Dynaslope\Data Analysis\updews-pycodes\Analysis")
 if not path in sys.path:
@@ -29,6 +29,8 @@ import rtwindow as rtw
 import querySenslopeDb as q
 import genproc as gp
 from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
+from operator import is_not
+from functools import partial
 
 
 #### Global Parameters
@@ -52,10 +54,11 @@ plasma = cm.colors
 ### Use 30 days for colpos and disp analysis or 3 days for velocity analysis
 vel_event_window = pd.Timedelta(3,'D')
 event_window = pd.Timedelta(30,'D')
-colpos_interval = 1 ### in days
+colpos_interval = 7 ### in days
 window = 3 ### in days
 window = pd.Timedelta(window,'D')
 threshold_file = 'threshold.csv'
+threshold_type = 'on onset'
 
 def remove_overlap(ranges):
     result = []
@@ -94,11 +97,12 @@ def t_crit(confidence_level,n):
     gamma = 1 - confidence_level
     return stats.t.ppf(1-gamma/2.,n)
 
-def uncertainty(x,y,slope,intercept,confidence_level,x_array = None):
+def uncertainty(x,y,slope,intercept,confidence_level,x_array = None,interval = 'confidence'):
     #### INPUT
     # x,y -> Experimental x & y values should have the same length (array)
     # Input x_array to evaluate uncertainty at the specified array
     # Computed slope & intercept (float)
+    # interval - type of interval to compute (confidence or prediction)
     #### OUTPUT
     # Uncertainty on the prediction of simple linear regression
     
@@ -107,10 +111,23 @@ def uncertainty(x,y,slope,intercept,confidence_level,x_array = None):
     sum_epsilon_square = sum_square_residual(x,y,slope,intercept)
     mean_x = np.mean(x)
     var_x = np.sum(np.square(x - mean_x))
-    if x_array == None:
-        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+    x_array = np.array(x_array)
+    if not x_array.all():
+        if interval == 'confidence':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+        elif interval == 'prediction':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1. + 1./n + (x - mean_x)**2/var_x)))
+        else:
+            print "Invalid type of interval"
+            raise ValueError
     else:
-        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x_array - mean_x)**2/var_x)))
+        if interval == 'confidence':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x_array - mean_x)**2/var_x)))
+        elif interval == 'prediction':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1. + 1/n + (x_array - mean_x)**2/var_x)))
+        else:
+            print "Invalid type of interval"
+            raise ValueError
 
 def GoodnessOfSplineFit(x,y,sp):
     mean = np.mean(y)
@@ -147,6 +164,16 @@ def CheckIfEventIsValid(candidate_triggers):
         
     return candidate_triggers
 
+def GetNodeLevelAlert(event_timestamp,sensor_column):
+    query = "SELECT * FROM senslopedb.node_level_alert WHERE timestamp >= '{}' AND timestamp <= '{}' AND site = '{}'".format(event_timestamp[0].strftime('%Y-%m-%d %H:%M:%S'),event_timestamp[1].strftime('%Y-%m-%d %H:%M:%S'),sensor_column)
+    return q.GetDBDataFrame(query)
+
+def GetVelDF(disp):
+    vel_df = disp.loc[:,['ts','id','vel_xz','vel_xy']]
+    vel_df['vel'] = 0
+    vel_df.loc[:,['vel']] = np.sqrt(np.power(vel_df.vel_xz,2) + np.power(vel_df.vel_xy,2)) * 100
+    return vel_df[['ts','id','vel']].reset_index(drop = True).set_index('ts')
+    
 def compute_depth(colposdf):
     colposdf = colposdf.drop_duplicates()
     colposdf = colposdf.sort_values(['id'],ascending = False)
@@ -252,7 +279,10 @@ def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False)
     num_nodes = monitoring.colprops.nos
     seg_len = monitoring.colprops.seglen
     
-    monitoring_vel = monitoring.vel.reset_index()[['ts', 'id', 'xz', 'xy']]
+    if compute_vel:
+        monitoring_vel = monitoring.vel.reset_index()[['ts', 'id', 'xz', 'xy','vel_xz','vel_xy']]
+    else:
+        monitoring_vel = monitoring.vel.reset_index()[['ts', 'id', 'xz', 'xy']]
     monitoring_vel = monitoring_vel.loc[(monitoring_vel.ts >= window.start)&(monitoring_vel.ts <= window.end)]
     
     colposdf = rp.compute_colpos(window, config, monitoring_vel, num_nodes, seg_len)
@@ -262,6 +292,7 @@ def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False)
     colposdf_ts = colposdf.groupby('ts',as_index = False)
     colposdf = colposdf_ts.apply(compute_depth)
     colposdf['depth'] = map(lambda x:x - max(colposdf.depth.values),colposdf['depth'])
+    
     return monitoring_vel.reset_index(drop = True),colposdf[['ts','id','depth','xy','xz']].reset_index(drop = True),sensor_column
 
 def ComputeCumShear(disp_ts):
@@ -775,6 +806,7 @@ def GetCumShearDF(disp,nodes):
     #### Compute Shear Displacements
     disp_ts = disp.groupby('ts',as_index = True)
     return disp_ts.apply(ComputeCumShear).reset_index(drop = True).set_index('ts')
+    
 
 def PlotInterpolation(disp,nodes,name,window):
     #### Get cumshear df
@@ -934,7 +966,7 @@ def PlotInterpolation(disp,nodes,name,window):
             os.makedirs(save_path+'/')    
         
         #### Save figure
-        plt.savefig('{}/node{}{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num),
+        plt.savefig('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num),
                 dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
         
         #### Close figure
@@ -943,7 +975,7 @@ def PlotInterpolation(disp,nodes,name,window):
         #### Increment figure number
         fig_num += 1
 
-def PlotThresholds(threshold_file):
+def PlotThresholds(threshold_file,confidence = 0.95,interval = 'confidence'):
     #### Obtain data frame from file
     threshold_df = pd.read_csv(threshold_file,index_col = 0)         
 
@@ -968,7 +1000,7 @@ def PlotThresholds(threshold_file):
         
         #### Compute the parameters of linear regression and confidence interval
         slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
-        delta = uncertainty(log_v,log_a,slope,intercept,0.9999,x_array = np.log(all_v))
+        delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval)
         
         #### Compute the threshold line and confidence interval values
         a_threshold = np.exp(slope*np.log(all_v) + intercept)
@@ -995,7 +1027,7 @@ def PlotThresholds(threshold_file):
     log_v = np.log(v)
     log_a = np.log(a)
     slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
-    delta = uncertainty(log_v,log_a,slope,intercept,0.9999,x_array = np.log(all_v))
+    delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval)
     a_threshold = np.exp(slope*np.log(all_v) + intercept)
     a_threshold_upper = np.exp(np.log(a_threshold) + delta)
     a_threshold_lower = np.exp(np.log(a_threshold) - delta)
@@ -1022,6 +1054,10 @@ def PlotThresholds(threshold_file):
     ax.legend(loc = 'upper left', fancybox = True, framealpha = 0.5)
     fig.suptitle('Velocity vs. Acceleration Threshold Line for Subsurface Movement',fontsize = 15)
     
+    #### Write anchored text of threshold type
+    threshold_type_at = AnchoredText("{}% {} Interval".format(round(confidence*100,2),interval.title()),prop=dict(size=10), frameon=False,loc = 3)        
+    ax.add_artist(threshold_type_at)
+    
     #### Set fig size borders and spacing
     fig.set_figheight(7.5)
     fig.set_figwidth(10)
@@ -1035,10 +1071,10 @@ def PlotThresholds(threshold_file):
     now = pd.to_datetime(datetime.now())
     
     #### Save figure
-    plt.savefig('{}/Velocity vs Acceleration Threshold Line {}.png'.format(save_path,now.strftime("%Y-%m-%d_%H-%M")),
+    plt.savefig('{}/Velocity vs Acceleration {} {} Threshold Line {}.png'.format(save_path,round(confidence*100,2),interval.title(),now.strftime("%Y-%m-%d_%H-%M")),
             dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
 
-def PlotThresholdLinePerSite(threshold_file):
+def PlotThresholdLinePerSite(threshold_file,confidence = 0.95,interval = 'confidence'):
     #### Obtain data frame from file
     threshold_df = pd.read_csv(threshold_file,index_col = 0)         
 
@@ -1054,7 +1090,7 @@ def PlotThresholdLinePerSite(threshold_file):
     
     #### Plot Threshold Lines
     for threshold_type in reversed(np.unique(threshold_df.type.values)):
-        
+
         #### Obtain critical values        
         v = threshold_df[threshold_df.type == threshold_type].velocity.values
         a = threshold_df[threshold_df.type == threshold_type].acceleration.values         
@@ -1065,7 +1101,7 @@ def PlotThresholdLinePerSite(threshold_file):
         
         #### Compute the parameters of linear regression and confidence interval
         slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
-        delta = uncertainty(log_v,log_a,slope,intercept,0.9999,x_array = np.log(all_v))
+        delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval = interval)
         
         #### Compute the threshold line and confidence interval values
         a_threshold = np.exp(slope*np.log(all_v) + intercept)
@@ -1092,7 +1128,7 @@ def PlotThresholdLinePerSite(threshold_file):
     log_v = np.log(v)
     log_a = np.log(a)
     slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
-    delta = uncertainty(log_v,log_a,slope,intercept,0.9999,x_array = np.log(all_v))
+    delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval)
     a_threshold = np.exp(slope*np.log(all_v) + intercept)
     a_threshold_upper = np.exp(np.log(a_threshold) + delta)
     a_threshold_lower = np.exp(np.log(a_threshold) - delta)
@@ -1149,6 +1185,10 @@ def PlotThresholdLinePerSite(threshold_file):
     ax.legend(sensor_markers,marker_labels,loc = 'lower right',fancybox = True, framealpha = 0.5,numpoints = 1)
     ax.add_artist(line_legends)
     
+    #### Write anchored text of threshold type
+    threshold_type_at = AnchoredText("{}% {} Interval".format(round(confidence*100,2),interval.title()),prop=dict(size=10), frameon=False,loc = 3)        
+    ax.add_artist(threshold_type_at)
+    
     #### Set fig size borders and spacing
     fig.set_figheight(7.5)
     fig.set_figwidth(10)
@@ -1163,10 +1203,10 @@ def PlotThresholdLinePerSite(threshold_file):
     now = pd.to_datetime(datetime.now())
     
     #### Save figure
-    plt.savefig('{}/Velocity vs Acceleration Threshold Line Per Site {}.png'.format(save_path,now.strftime("%Y-%m-%d_%H-%M")),
+    plt.savefig('{}/Velocity vs Acceleration {} {} Threshold Line Per Site {}.png'.format(save_path,round(confidence*100,2),interval,now.strftime("%Y-%m-%d_%H-%M")),
             dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
-def PlotVeocityComparison(disp,name,nodes,window):
+def PlotVelocityComparison(disp,name,nodes,window):
     #### Get cumshear df
     cumsheardf = GetCumShearDF(disp,nodes)
     
@@ -1182,6 +1222,7 @@ def PlotVeocityComparison(disp,name,nodes,window):
     cumsheardf['back'] = None
     cumsheardf['center'] = None
     cumsheardf['average'] = None
+    cumsheardf['spline_delay'] = None
     
     #### Get last timestamp in df
     last_ts = cumsheardf.index[-1]        
@@ -1192,11 +1233,14 @@ def PlotVeocityComparison(disp,name,nodes,window):
     #### Set bounds of slice df according to window
     for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
 
-#        #### Resume run
-#        if fig_num <= 5752:
+        #### Resume run
+#        if fig_num != 3:
 #            print "Skipping frame {:04d}".format(fig_num)
 #            fig_num+=1
 #            continue
+        
+        #### Print current progress
+        print "Plotting 'Velocity Comparison' figure number {:04d}".format(fig_num)        
         
         #### Set end ts according to window        
         ts_end = ts_start + window
@@ -1235,6 +1279,548 @@ def PlotVeocityComparison(disp,name,nodes,window):
         vel_spline = vel_int[-1]
         
         #### Method 2: From ordinary least squares
-        slope, intercept, r_value, p_value, std_err = stats.linregress(disp[-7:])
+        slope, intercept, r_value, p_value, std_err = stats.linregress(time_delta[-7:],disp[-7:])
+        vel_ols = slope
         
+        #### Method 3: From backward difference formula (sixth order)
+        vel_back = np.sum(disp[-4:] *np.array([-1/3.,3/2.,-3.,11/6.]))/ (time_delta[-1] - time_delta[-2])
+        
+        #### Method 4: From central difference formula (sixth order)
+        vel_center = np.sum(disp[-7:] *np.array([-1/60.,3/20.,-3/4.,0.,3/4.,-3/20.,1/60.])) / (time_delta[-1] - time_delta[-2])
+        
+        #### Method 5: From average velocity
+        vel_average = (disp[-1] - disp[-7]) / (time_delta[-1] - time_delta[-7])
+        
+        #### Method 6: Spline Delay
+        vel_spline_delay = sp.derivative(n=1)(time_delta[-4])
+        
+        #### Write results to the data frame
+        cumsheardf.loc[ts_end,['spline','ols','back','center','average','spline_delay']] = vel_spline, vel_ols, vel_back, vel_center, vel_average, vel_spline_delay
+        slicedf.loc[ts_end,['spline','ols','back','center','average','spline_delay']] = vel_spline, vel_ols, vel_back, vel_center, vel_average, vel_spline_delay
+        
+        #### Commence plotting
+        #### Initialize figure parameters
+        fig = plt.figure()
+        disp_ax = fig.add_subplot(211)
+        vel_ax = fig.add_subplot(212,sharex = disp_ax)
+        
+        #### Plot Grid
+        disp_ax.grid()
+        vel_ax.grid()
+        
+        #### Compute corresponding datetime array
+        datetime_array = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_delta)        
+        datetime_int = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_int)
+        
+        #### Plot computed values
+        
+        ### Plot data and interpolated values
+        disp_ax.plot(datetime_array[-72:],disp[-72:],'.',color = tableau20[0],label = 'Data')
+        disp_ax.plot(datetime_int,disp_int,'-',color = tableau20[12],label = 'Interpolation')
+        
+        #### Plot velocity values
+        vel_ax.plot(datetime_array[-72:],slicedf.back.values[-72:],'-',color = tableau20[6],label = 'Back',lw = 1.75)
+        vel_ax.plot(datetime_array[-72:],slicedf.center.values[-72:],'-',color = tableau20[8],label = 'Center',lw = 1.75)
+        vel_ax.plot(datetime_array[-72:],slicedf.average.values[-72:],'-',color = tableau20[18],label = 'Average',lw = 1.75)
+        vel_ax.plot(datetime_array[-72:],slicedf.spline_delay.values[-72:],'-',color = tableau20[10],label = 'Spline (Delay)',lw = 1.75)
+        vel_ax.plot(datetime_array[-72:],slicedf.spline.values[-72:],'-',color = tableau20[2],label = 'Spline', lw = 1.75)
+        vel_ax.plot(datetime_array[-72:],slicedf.ols.values[-72:],'-',color = tableau20[4],label = 'OLS', lw = 1.75)
+
+        #### Set datetime format for x axis
+        disp_ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+        vel_ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+        
+        #### Set xlim for plots
+        disp_ax.set_xlim(datetime_array[-72],ts_end)        
+        
+        #### Set ylim for plots
+        disp_max = max(np.concatenate((disp[-72:],disp_int[-72:])))
+        disp_min = min(np.concatenate((disp[-72:],disp_int[-72:])))
+        disp_range = abs(disp_max - disp_min)
+        all_v = np.concatenate((slicedf.spline.values[-72:],slicedf.ols.values[-72:],slicedf.back.values[-72:],slicedf.center.values[-72:],slicedf.average.values[-72:]))
+        vel_max = max(all_v)
+        vel_min = min(all_v)
+        try:
+            vel_range = abs(vel_max - vel_min)
+            vel_ax.set_ylim(vel_min - vel_range*0.05,vel_max + vel_range*0.05)
+        except:
+            vel_range = 0
+        
+        disp_ax.set_ylim(disp_min - disp_range*0.05,disp_max + disp_range *0.05)
+        
+        ### Create inset axes
+        inset_ax = inset_axes(disp_ax,width = "14%",height = "20%",loc = 3)
+        
+        ### Plot current range to the inset axes
+        inset_ax.plot(cumsheardf.index,cumsheardf.cumshear.values)
+        inset_ax.axvspan(datetime_array[-72],ts_end,facecolor = tableau20[2],alpha = 0.5)
+        
+        ### Hide ticks and labels for inset plot
+        inset_ax.tick_params(top = 'off',left = 'off',bottom = 'off',right = 'off',labelleft = 'off',labelbottom = 'off')        
+        
+        ### Set transparency for inset plot
+        inset_ax.patch.set_alpha(0.5)     
+        
+        #### Incorporate Anchored Texts
+        disp_at = AnchoredText("SSR = {}\n$r^2$ = {}\n RMSE = {}".format(np.round(SS_res,4),np.round(r2,4),np.round(RMSE,4)),prop=dict(size=10), frameon=True,loc = 4)        
+        disp_at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        disp_at.patch.set_alpha(0.5)
+        
+        disp_ax.add_artist(disp_at)
+        
+        #### Incorporate frame number in the figure
+        plt.figtext(1-0.005,0.005,str(fig_num),ha = 'right',va='bottom',fontsize = 8)
+        
+        #### Plot legend
+        disp_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12)
+        vel_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5, fontsize = 12)
+        
+        #### Set fig title
+        fig.suptitle('Velocity Comparison Plot for Site {} Sensor {}'.format(name[:3].upper(),name.upper()),fontsize = 15)        
+        
+        #### Set axis labels
+        disp_ax.set_ylabel('Displacement (cm)',fontsize = 14)
+        vel_ax.set_ylabel('Velocity (cm/day)',fontsize = 14)
+        vel_ax.set_xlabel('Date',fontsize = 14)
+        
+        ### Hide x-axis tick labels of displacement
+        disp_ax.tick_params(axis = 'x',labelbottom = 'off')
+        
+        #### Set fig size borders and spacing
+        fig.set_figheight(7.5*1.25)
+        fig.set_figwidth(15*0.70)
+        fig.subplots_adjust(right = 0.96,top = 0.93,left = 0.085,bottom = 0.07,hspace = 0.11, wspace = 0.20)
+        
+        #### Set save path
+        save_path = "{}/{}/Event {} to {}/Velocity Comparison".format(data_path,name,cumsheardf.index[0].strftime("%d %b %y"),last_ts.strftime("%d %b %y"))
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')    
+        
+        #### Save figure
+        plt.savefig('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num),
+                dpi=240, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        #### Close figure
+        plt.close()
+        
+        #### Increment figure number
+        fig_num += 1
+        
+def PlotVelocityInterpretation(disp,name,nodes,window):
+    #### Get cumshear df
+    cumsheardf = GetCumShearDF(disp,nodes)
+    
+    #### Compute for time delta values
+    cumsheardf['time'] = map(lambda x: x / np.timedelta64(1,'D'),cumsheardf.index - cumsheardf.index[0])
+    
+    #### Convert displacement to centimeters
+    cumsheardf['cumshear'] = cumsheardf.cumshear.apply(lambda x:x*100)
+    
+    #### Initialize velocity computation data
+    cumsheardf['spline'] = None
+    cumsheardf['ols'] = None
+    cumsheardf['back'] = None
+    cumsheardf['center'] = None
+    cumsheardf['average'] = None
+    cumsheardf['spline_delay'] = None
+    
+    #### Get last timestamp in df
+    last_ts = cumsheardf.index[-1]        
+    
+    #### Set figure number    
+    fig_num = 1
+        
+    #### Set bounds of slice df according to window
+    for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
+
+        #### Resume run
+#        if fig_num != 3:
+#            print "Skipping frame {:04d}".format(fig_num)
+#            fig_num+=1
+#            continue
+        
+        #### Print current progress
+        print "Plotting 'Velocity Interpretation' figure number {:04d}".format(fig_num)        
+        
+        #### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        disp = slicedf.cumshear.values
+        
+        #### Commence interpolation
+        try:
+            #### Take the gaussian average of data points and its variance
+            _,var = moving_average(disp)
+            sp = UnivariateSpline(time_delta,disp,w=1/np.sqrt(var))
+            
+            #### Use 10000 points for interpolation
+            time_int = np.linspace(time_delta[0],time_delta[-1],10000)
+            time_int_extended = np.linspace(time_delta[0],time_delta[-1]+1/24.,10000)            
+            
+            #### Spline interpolation values    
+            disp_int = sp(time_int)
+            disp_int_extended = sp(time_int_extended)
+            vel_int = sp.derivative(n=1)(time_int)
+                        
+        except:
+            print "Interpolation Error {}".format(pd.to_datetime(str(time_delta[-1])).strftime("%m/%d/%Y %H:%M"))
+            disp_int = np.ones(len(time_int))*np.nan
+            vel_int = np.ones(len(time_int))*np.nan
+        
+        #### Perform velocity computations using different methods
+        
+        #### Method 1: From spline interpolation
+        vel_spline = vel_int[-1]
+        
+        #### Method 2: From ordinary least squares
+        slope, intercept, r_value, p_value, std_err = stats.linregress(time_delta[-7:],disp[-7:])
+        vel_ols = slope
+        
+        #### Method 3: From backward difference formula (sixth order)
+        vel_back = np.sum(disp[-4:] *np.array([-1/3.,3/2.,-3.,11/6.]))/ (time_delta[-1] - time_delta[-2])
+        
+        #### Method 4: From central difference formula (sixth order)
+        vel_center = np.sum(disp[-7:] *np.array([-1/60.,3/20.,-3/4.,0.,3/4.,-3/20.,1/60.])) / (time_delta[-1] - time_delta[-2])
+        
+        #### Method 5: From average velocity
+        vel_average = (disp[-1] - disp[-7]) / (time_delta[-1] - time_delta[-7])
+        
+        #### Method 6: Spline Delay
+        vel_spline_delay = sp.derivative(n=1)(time_delta[-4])
+        
+        #### Write results to the data frame
+        cumsheardf.loc[ts_end,['spline','ols','back','center','average','spline_delay']] = vel_spline, vel_ols, vel_back, vel_center, vel_average, vel_spline_delay
+        slicedf.loc[ts_end,['spline','ols','back','center','average','spline_delay']] = vel_spline, vel_ols, vel_back, vel_center, vel_average, vel_spline_delay
+        
+        #### Commence plotting
+        #### Initialize figure parameters
+        fig = plt.figure()
+        disp_ax = fig.add_subplot(111)
+        
+        #### Plot Grid
+        disp_ax.grid()
+        
+        #### Compute corresponding datetime array
+        datetime_array = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_delta)        
+        datetime_int_extended = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_int_extended)       
+        
+        #### Plot computed values
+        
+        ### Plot data and interpolated values
+        data, = disp_ax.plot(datetime_array[-7:],disp[-7:],'.',color = tableau20[0],label = 'Data',markersize = 12,zorder = 3)
+        disp_ax.plot(datetime_int_extended,disp_int_extended,'-',color = tableau20[12],label = 'Interpolation',lw = 2.5)
+        
+        ### Construct the interpretations of the different methods
+        time_line = np.linspace(time_delta[-9],time_delta[-1]+1/24.,10000)
+        datetime_line = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_line)         
+        
+        ### Method 1: Velocity from spline
+        spline_line = vel_spline*(time_line - time_delta[-1]) + disp_int[-1]
+        disp_ax.plot(datetime_line,spline_line,'--',color = tableau20[2],label = 'Spline', lw = 1.75)
+        
+        ### Method 2: From ols
+        ols_line = slope*time_line + intercept
+        disp_ax.plot(datetime_line,ols_line,'--',color = tableau20[4],label = 'OLS', lw = 1.75)
+        
+        ### Plot mean disp and mean time for the window
+        disp_mean = np.mean(disp[-7:])
+        time_mean = np.mean(time_delta[-7:])
+        datetime_mean = cumsheardf.index[0] + time_mean*pd.Timedelta(1,'D')
+        disp_ax.plot(datetime_mean, disp_mean,'*',color = tableau20[4],markersize = 6)        
+        
+        ### Method 3: From backward difference formula
+        back_line = vel_back*(time_line - time_delta[-1]) + disp[-1]
+        disp_ax.plot(datetime_line,back_line,'--',color = tableau20[6],label = 'Back',lw = 1.75)
+        
+        ### Method 4: From central difference formula
+        center_line = vel_center*(time_line - time_delta[-4]) + disp[-4]
+        disp_ax.plot(datetime_line,center_line,'--',color = tableau20[8],label = 'Center',lw = 1.75)
+        
+        ### Method 5: From average
+        average_line = vel_average*(time_line - time_delta[-1]) + disp[-1]
+        disp_ax.plot(datetime_line,average_line,'--',color = tableau20[18],label = 'Average',lw = 1.75)
+        
+        ### Method 6: From spline delay
+        spline_delay_line = vel_spline_delay*(time_line - time_delta[-4]) + sp(time_delta[-4])
+        disp_ax.plot(datetime_line,spline_delay_line,'--',color = tableau20[10],label = 'Spline (Delay)',lw = 1.75)
+        
+        #### Set datetime format for x axis
+        disp_ax.xaxis.set_major_formatter(md.DateFormatter("%H:%M"))
+        
+        #### Set xlim for plots
+        disp_ax.set_xlim(datetime_array[-9],ts_end+pd.Timedelta(1,'h'))        
+        
+        #### Set ylim for plots
+        disp_max = max(np.concatenate((disp[-7:],disp_int[np.where(time_int <= time_delta[-7])[-1][-1]:])))
+        disp_min = min(np.concatenate((disp[-7:],disp_int[np.where(time_int <= time_delta[-7])[-1][-1]:])))
+        disp_range = abs(disp_max - disp_min)
+        
+        disp_ax.set_ylim(disp_min - disp_range*0.075,disp_max + disp_range *0.075)
+        
+        #### Incorporate frame number in the figure
+        plt.figtext(1-0.005,0.005,str(fig_num),ha = 'right',va='bottom',fontsize = 8)
+        
+        #### Plot legend
+        disp_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12,handler_map = {data: HandlerLine2D(numpoints = 1)},numpoints = 8)
+        
+        #### Set fig title
+        fig.suptitle('Velocity Interpretation Plot for Site {} Sensor {}'.format(name[:3].upper(),name.upper()),fontsize = 15)        
+        
+        #### Set axis labels
+        disp_ax.set_ylabel('Displacement (cm)',fontsize = 14)
+        disp_ax.set_xlabel('Timestamp',fontsize = 14)
+                
+        #### Set fig size borders and spacing
+        fig.set_figheight(7.5)
+        fig.set_figwidth(10)
+#        fig.subplots_adjust(right = 0.96,top = 0.93,left = 0.085,bottom = 0.07,hspace = 0.11, wspace = 0.20)
+        
+        #### Set save path
+        save_path = "{}/{}/Event {} to {}/Velocity Interpretation".format(data_path,name,cumsheardf.index[0].strftime("%d %b %y"),last_ts.strftime("%d %b %y"))
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')    
+        
+        #### Save figure
+        plt.savefig('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num),
+                dpi=240, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        #### Close figure
+        plt.close()
+        
+        #### Increment figure number
+        fig_num += 1
+
+def GenerateThresholds(threshold_file,threshold_type,v_range,confidence = 0.95,interval = 'confidence'):
+    #### Obtain data frame from file
+    threshold_df = pd.read_csv(threshold_file,index_col = 0)         
+    
+    #### Obtain critical values
+    if threshold_type != 'ALL':        
+        v = threshold_df[threshold_df.type == threshold_type].velocity.values
+        a = threshold_df[threshold_df.type == threshold_type].acceleration.values         
+    else:
+        v = threshold_df.velocity.values
+        a = threshold_df.acceleration.values         
+        
+    #### Obtain the logarithm of the critical values
+    log_v = np.log(v)
+    log_a = np.log(a)
+    
+    #### Compute the parameters of linear regression and confidence interval
+    slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
+    delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(v_range),interval)
+    
+    #### Compute the threshold line and confidence interval values
+    a_threshold = np.exp(slope*np.log(v_range) + intercept)
+    a_threshold_upper = np.exp(np.log(a_threshold) + delta)
+    a_threshold_lower = np.exp(np.log(a_threshold) - delta)
+    
+    return a_threshold,a_threshold_upper,a_threshold_lower
+    
+
+def PlotOOAResults(disp,name,nodes,window,threshold_type = 'ALL',confidence = 0.95,interval = 'prediction'):
+    #### Get cumshear df
+    disp_df = disp
+    cumsheardf = GetCumShearDF(disp,nodes)
+    
+    #### Get vel df
+    vel_df = GetVelDF(disp)
+    
+    #### Compute for time delta values
+    cumsheardf['time'] = map(lambda x: x / np.timedelta64(1,'D'),cumsheardf.index - cumsheardf.index[0])
+    
+    #### Convert displacement to centimeters
+    cumsheardf['cumshear'] = cumsheardf.cumshear.apply(lambda x:x*100)
+    
+    #### Initialize spline, velocity, and acceleration computation data
+    cumsheardf['spline'] = None
+    cumsheardf['velocity'] = None
+    cumsheardf['acceleration'] = None
+    cumsheardf['spline_gof'] = None
+
+    
+    #### Get last timestamp in df
+    last_ts = cumsheardf.index[-1]        
+    
+    #### Set computation number
+    comp_num = 1    
+    
+    #### Perform spline computations
+    for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
+        #### Control run
+        if comp_num >= 21:
+           print "Skipping computation #{:04d}".format(comp_num)
+           comp_num += 1
+           continue
+        
+        #### Print current progress
+        print "Performing spline computation #{:04d}".format(comp_num)        
+        
+        #### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        disp = slicedf.cumshear.values
+        
+        #### Commence interpolation
+        try:
+            #### Take the gaussian average of data points and its variance
+            _,var = moving_average(disp)
+            sp = UnivariateSpline(time_delta,disp,w=1/np.sqrt(var))
+            
+            #### Perform velocity computation
+            vel_spline = sp.derivative(n=1)(time_delta[-1])
+            acc_spline = sp.derivative(n=2)(time_delta[-1])
+            
+            #### Evaluate goodness of fit of spline
+            SS_res, r2, RMSE = GoodnessOfSplineFit(time_delta,disp,sp)            
+                                                
+        except:
+            print "Interpolation Error {}".format(pd.to_datetime(str(time_delta[-1])).strftime("%m/%d/%Y %H:%M"))
+        
+        #### Store the velocity, acceleration and spline results to df
+        cumsheardf.loc[ts_end,['spline','velocity','acceleration','spline_gof']] = sp, vel_spline, acc_spline,(SS_res, r2, RMSE)
+        
+        #### Increment computation number
+        comp_num += 1
+    
+    #### Plotting all the results to one figure
+    
+    #### Set figure number
+    fig_num = 1
+    
+    #### Determine maximum and minimum values for v
+    vel_max = max(np.abs(cumsheardf.velocity.dropna().values))
+    vel_min = min(np.abs(cumsheardf.velocity.dropna().values))
+    vel_range = np.linspace(vel_min,vel_max,100000)
+    #### Generate threshold lines
+    a_threshold, a_threshold_upper, a_threshold_lower = GenerateThresholds(threshold_file,threshold_type,vel_range,confidence,interval = interval)
+    
+    ### Get node level alert
+    node_level_df = GetNodeLevelAlert((disp_df.ix[0].ts,disp_df.ix[len(disp_df)-1].ts),name)    
+    
+    #### Plot result per time window
+    
+    for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
+        
+        #### Control run
+        if fig_num != 19:
+#            print "Skipping figure #{:04d}".format(fig_num)
+            fig_num += 1
+            continue
+        
+        #### Print current progress
+        print "Plotting 'OOA result' figure #{:04d}".format(fig_num)        
+        
+        #### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        disp = slicedf.cumshear.values
+    
+        #### Initialize figure
+        fig = plt.figure()
+        va_ax = fig.add_subplot(121)
+        disp_ax = fig.add_subplot(222)
+        vel_ax = fig.add_subplot(224, sharex = disp_ax)
+        
+        #### Plot grids
+        va_ax.grid()
+        disp_ax.grid()
+        vel_ax.grid()        
+        
+        #### Plot velocity acceleration results
+        
+        #### Plot threshold line and confidence interval
+        thresh_line = va_ax.plot(vel_range,a_threshold,'-',color = tableau20[0],label = 'Threshold Line')
+        va_ax.plot(vel_range,a_threshold_upper,'--',color = tableau20[0])
+        va_ax.plot(vel_range,a_threshold_lower,'--',color = tableau20[0])
+        va_ax.fill_between(vel_range,a_threshold_upper,a_threshold_lower,color = tableau20[0],alpha = 0.2)
+        
+                
+        
+        #### Plot v-a line for the last 7 values
+        
+        ### Filter None values then take absolute values
+        vel_7 = np.abs(filter(partial(is_not,None),slicedf.velocity.values[-7:]))
+        acc_7 = np.abs(filter(partial(is_not,None),slicedf.acceleration.values[-7:]))
+        
+        va_ax.plot(vel_7,acc_7,'-',color = tableau20[6])
+
+        for index in range(len(vel_7)):
+            velocity = vel_7[index]
+            acceleration = acc_7[index]
+
+            #### Plot each velocity and acceleration
+            if index != len(vel_7) -1 :
+                prev_pt = va_ax.plot(velocity,acceleration,'o',color = tableau20[6],label = 'Previous')
+            
+            #### Choose a different marker for last point
+            else:
+                cur_pt = va_ax.plot(velocity,acceleration,'s',color = tableau20[6],label = 'Current')
+        
+        #### Plotting data and interpolation for last 7 values
+        ### Set time allowance for plotting        
+        time_int = np.linspace(time_delta[-7] - 0.5/24.,time_delta[-1] + 0.5/24)
+        disp_int = slicedf.spline.values[-1](time_int)
+        
+        #### Plot data and interpolation
+        disp_ax.plot(time_delta[-7:],disp[-7:],'.',color = tableau20[0],label = 'Data')
+        disp_ax.plot(time_int,disp_int,'-',color = tableau20[12],label = 'Interpolation')
+        
+        #### Plot velocities from spline computation and nodes
+        
+        #### Plotting spline computation velocity
+        vel_ax.plot(time_delta[-7:],vel_7,color = tableau20[4],label = 'Spline')
+        
+        #### Check nodes with alert
+        number = 1
+        for node_vel in np.unique(node_level_df.id.values):
+            #### Select only relevant node
+            node_df = vel_df[vel_df.id == node_vel]
+            
+            #### Select only relevant time
+            vel_ax.plot(time_delta[-7:],node_df[node_df.index <= ts_end].vel.values[-7:],color = tableau20[2*(number + 2)%20],label = 'Node {}'.format(node_vel))            
+            number += 1
+        
+        #### Incorporate anchored texts
+        # Goodness of fit parameters
+        int_at = AnchoredText("SSR = {}\n$r^2$ = {}\n RMSE = {}".format(np.round(slicedf.spline_gof.values[-1][0],4),np.round(slicedf.spline_gof.values[-1][1],4),np.round(slicedf.spline_gof.values[-1][2],4)),prop=dict(size=10), frameon=True,loc = 4)        
+        int_at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        int_at.patch.set_alpha(0.5)
+        
+        # Current Node Alert
+        
+        
+        #### Plot anchored texts
+        disp_ax.add_artist(int_at)        
+        
+        #### Set scale for velocity acceleration graph
+        va_ax.set_xscale('log')
+        va_ax.set_yscale('log')
+        
+        #### Set legends for va plot
+        va_lines = thresh_line + cur_pt + prev_pt
+        va_labels = [l.get_label() for l in va_lines]
+        
+        #### Plot legends
+        va_ax.legend(va_lines,va_labels,loc = 'upper left', fancybox = True,framealpha = 0.5,handler_map = {cur_pt[0]: HandlerLine2D(numpoints = 1),prev_pt[0]: HandlerLine2D(numpoints = 1)},fontsize = 12)
+        disp_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12)
+        vel_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12)        
+        
+        #### Increment figure number
+        fig_num += 1
         

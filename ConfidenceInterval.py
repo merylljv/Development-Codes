@@ -23,11 +23,12 @@ def t_crit(confidence_level,n):
     gamma = 1 - confidence_level
     return stats.t.ppf(1-gamma/2.,n)
 
-def uncertainty(x,y,slope,intercept,confidence_level,x_array = None):
+def uncertainty(x,y,slope,intercept,confidence_level,x_array = None,interval = 'confidence'):
     #### INPUT
     # x,y -> Experimental x & y values should have the same length (array)
     # Input x_array to evaluate uncertainty at the specified array
     # Computed slope & intercept (float)
+    # interval - type of interval to compute (confidence or prediction)
     #### OUTPUT
     # Uncertainty on the prediction of simple linear regression
     
@@ -37,20 +38,68 @@ def uncertainty(x,y,slope,intercept,confidence_level,x_array = None):
     mean_x = np.mean(x)
     var_x = np.sum(np.square(x - mean_x))
     if x_array == None:
-        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+        if interval == 'confidence':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x - mean_x)**2/var_x)))
+        elif interval == 'prediction':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1. + 1./n + (x - mean_x)**2/var_x)))
+        else:
+            print "Invalid type of interval"
+            raise ValueError
     else:
-        return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x_array - mean_x)**2/var_x)))
+        if interval == 'confidence':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1/n + (x_array - mean_x)**2/var_x)))
+        elif interval == 'prediction':
+            return t*np.sqrt((1/(n-2)*sum_epsilon_square*(1. + 1/n + (x_array - mean_x)**2/var_x)))
+        else:
+            print "Invalid type of interval"
+            raise ValueError
 
-def confidence_interval_upper(x,y,slope,intercept,confidence_level):
+def confidence_interval_upper(x,y,slope,intercept,confidence_level,interval = 'confidence'):
     #### Computes for the upper bound values of the confidence interval
-    delta = uncertainty(x,y,slope,intercept,confidence_level)
+    delta = uncertainty(x,y,slope,intercept,confidence_level,interval)
     return slope*x + intercept + delta
 
-def confidence_interval_lower(x,y,slope,intercept,confidence_level):
+def confidence_interval_lower(x,y,slope,intercept,confidence_level,interval = 'confidence'):
     #### Computes for the lower bound values of the confidence interval
-    delta = uncertainty(x,y,slope,intercept,confidence_level)
+    delta = uncertainty(x,y,slope,intercept,confidence_level,interval)
     return slope*x + intercept - delta
-    
+
+def slope_unc(x,y,slope,intercept,interval = 'confidence'):
+    #### Computes for the uncertainty of the measurement of slope for specified type of interval
+    #### x,y - data points
+    #### slope, intercept - linear regression results
+    #### interval - choose from confidence or prediction
+
+    MSE = 1 / float(len(x) - 2) * sum_square_residual(x,y,slope,intercept)
+    if interval == 'confidence':
+        return np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)))
+    elif interval == 'prediction':
+        return np.sqrt(MSE / np.sum(np.power(x - np.mean(x),2)) + MSE)
+    else:
+        print "Invalid type of interval"
+        raise ValueError
+
+def intercept_unc(x,y,slope,intercept,interval = 'confidence'):
+    #### Computes for the uncertainty of the measurement of intercept for specified type of interval
+    #### x,y - data points
+    #### slope, intercept - linear regression results
+    #### interval - choose from confidence or prediction    
+
+    MSE = 1 / float(len(x) - 2) * sum_square_residual(x,y,slope,intercept)
+    if interval == 'confidence':
+        return np.sqrt(MSE * (1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
+    elif interval == 'prediction':
+        return np.sqrt(MSE * (1 + 1/float(len(x)) + np.mean(x)**2 / np.sum(np.power(x - np.mean(x),2))))
+    else:
+        print "Invalid type of interval"
+        raise ValueError
+
+def dist_point_to_line(x,y,slope,intercept):
+    #### Computes for the distance between point x,y to a line with given slope and intercept
+    #### x,y - array
+    #### slope, intercept - linear regression results
+    return np.abs(slope*x - y + intercept) / np.sqrt(slope**2 + 1)
+
 def test():
     #### Test run of the algorithm
     #### Simulate data points
