@@ -13,6 +13,17 @@ from scipy.ndimage import filters
 #### Impulse Response Function based on 
 #### "The application of an innovative inverse model for understanding and predicting landslide movements Belle, Anunay et. al 2014"
 
+tableau20 = [(31, 119, 180), (174, 199, 232), (255, 127, 14), (255, 187, 120),    
+             (44, 160, 44), (152, 223, 138), (214, 39, 40), (255, 152, 150),    
+             (148, 103, 189), (197, 176, 213), (140, 86, 75), (196, 156, 148),    
+             (227, 119, 194), (247, 182, 210), (127, 127, 127), (199, 199, 199),    
+             (188, 189, 34), (219, 219, 141), (23, 190, 207), (158, 218, 229)]
+
+for i in range(len(tableau20)):    
+    r, g, b = tableau20[i]    
+    tableau20[i] = (r / 255., g / 255., b / 255.)
+
+
 def step_fcn(t,A,d):
     return np.where(np.logical_and(t>=0,t<=d),1,0)*A
 
@@ -49,11 +60,12 @@ def demo():
     
     #### Generating test signals
     t = np.arange(0,150,1)
-    test_input = 5.0*np.cos(t/7.14)+np.random.rand(len(t))
-    test_output = 2.0*np.sin(t/7.14)+np.random.rand(len(t))
+    test_input = 5.0*np.cos(t/7.14) + np.random.random(len(t))
+    test_output = 2.0*np.sin(t/7.14) + np.random.random(len(t))
     
     #### Parameter criteria
     bnds = ((0,None),(0,None),(0,None),(0,None))
+    
     ###Finding optimized parameters using SLSQP
     
     ### Starting parameters
@@ -72,8 +84,20 @@ def demo():
     predicted_output = model_output_signal(optimized_trans,test_input,res.x[3])
     
     ####Plot results
-    plt.plot(t,test_input,label = 'Input')
-    plt.plot(t,predicted_output,label = 'Predicted')
-    plt.plot(t,test_output,label = 'Actual')
-    plt.legend(loc = 'upper left')
-    plt.show()
+    fig = plt.figure(num = 1)
+    ax = fig.add_subplot(111)
+    ax.grid()
+    ax.plot(t,test_input,color = tableau20[0],label = 'Input',lw = 1.5)
+    ax.plot(t,predicted_output,color = tableau20[4],label = 'Predicted',lw = 1.5)
+    ax.plot(t,test_output,color = tableau20[6],label = 'Actual',lw = 1.5)
+    ax.legend(loc = 'upper left',fancybox = True,framealpha=0.5)
+    
+    #### Plot transfer functions
+    fig = plt.figure(num = 2)
+    ax = fig.add_subplot(111)
+    ax.grid()
+    t1 = np.arange(0,150,0.01)
+    ax.plot(t1,exp1(t1,T,D),color = tableau20[6],label = 'Gaussian',lw = 1.5)
+    ax.plot(t1,exp2(t1,L),color = tableau20[4],label = 'Exp Decay',lw = 1.5)
+#    ax.plot(t,transfer_function(n,T,D,L),color = tableau20[0],label = 'Transfer Function',lw = 1.5)
+    ax.legend(loc = 'upper left',fancybox = True,framealpha=0.5)

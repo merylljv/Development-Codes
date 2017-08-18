@@ -54,14 +54,14 @@ def uncertainty(x,y,slope,intercept,confidence_level,x_array = None,interval = '
             print "Invalid type of interval"
             raise ValueError
 
-def confidence_interval_upper(x,y,slope,intercept,confidence_level,interval = 'confidence'):
+def confidence_interval_upper(x,y,slope,intercept,confidence_level,x_array = None,interval = 'confidence'):
     #### Computes for the upper bound values of the confidence interval
-    delta = uncertainty(x,y,slope,intercept,confidence_level,interval)
+    delta = uncertainty(x,y,slope,intercept,confidence_level,x_array,interval)
     return slope*x + intercept + delta
 
-def confidence_interval_lower(x,y,slope,intercept,confidence_level,interval = 'confidence'):
+def confidence_interval_lower(x,y,slope,intercept,confidence_level,x_array = None,interval = 'confidence'):
     #### Computes for the lower bound values of the confidence interval
-    delta = uncertainty(x,y,slope,intercept,confidence_level,interval)
+    delta = uncertainty(x,y,slope,intercept,confidence_level,x_array,interval)
     return slope*x + intercept - delta
 
 def slope_unc(x,y,slope,intercept,confidence_level,interval = 'confidence'):
@@ -113,15 +113,18 @@ def test():
     #### Compute simple linear regression parameters
     slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
     
-    #### Compute upper and lower bound of confidence interval for 99.99% level
-    upper = confidence_interval_upper(x,y,slope,intercept,0.9999)
-    lower = confidence_interval_lower(x,y,slope,intercept,0.9999)
-    
+    #### Compute upper and lower bound of confidence interval for 95.00% level
+    upper = confidence_interval_upper(x,y,slope,intercept,0.950)
+    lower = confidence_interval_lower(x,y,slope,intercept,0.950)
+    upper_pred = confidence_interval_upper(x,y,slope,intercept,0.950,interval = 'prediction')
+    lower_pred = confidence_interval_lower(x,y,slope,intercept,0.950,interval = 'prediction')
     #### Plot the results
     plt.plot(x,y,'.',c = 'blue',label = 'Data points')
     plt.plot(x,slope*x + intercept,c = 'red',label = 'Simple LR')
     plt.plot(x,upper,'--',c = 'red',label = 'Confidence Interval')
     plt.plot(x,lower,'--',c = 'red')
+    plt.plot(x,upper_pred,'--',c = 'green',label = 'Prediction Interval')
+    plt.plot(x,lower_pred,'--',c = 'green')
     plt.legend(loc = 'upper left')
     plt.show()
     
