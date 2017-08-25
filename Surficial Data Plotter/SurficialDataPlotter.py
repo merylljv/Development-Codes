@@ -718,10 +718,10 @@ def CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,reposition = 
             sms_cumdisp = surficial_data[sms_mask]['cumulative_displacement'].values
             
             ## Get L2 SMS points
-            sms_l2_history = (history_data.site_code == site) * (history_data.marker_name == marker) * (history_data.operation == 'l2') * (history_data.data_source == 'SMS')
+            sms_l2_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l2') , (history_data.data_source == 'SMS')))
             sms_l2_mask = np.array(map(lambda x: x in history_data[sms_l2_history].ts.values,sms_ts))
             
-            if sms_l2_mask != []:
+            if len(sms_l2_mask) != 0:
                 sms_l2_ts = sms_ts[sms_l2_mask]
                 sms_l2_cumdisp = sms_cumdisp[sms_l2_mask]
             else:
@@ -729,10 +729,10 @@ def CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,reposition = 
                 sms_l2_cumdisp = []
             
             ## Get L3 SMS points
-            sms_l3_history = (history_data.site_code == site) * (history_data.marker_name == marker) * (history_data.operation == 'l3') * (history_data.data_source == 'SMS')
+            sms_l3_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)) , np.logical_and((history_data.operation == 'l3'),(history_data.data_source == 'SMS')))
             sms_l3_mask = np.array(map(lambda x: x in history_data[sms_l3_history].ts.values,sms_ts))
             
-            if sms_l3_mask != []:
+            if len(sms_l3_mask) != 0:
                 sms_l3_ts = sms_ts[sms_l3_mask]
                 sms_l3_cumdisp = sms_cumdisp[sms_l3_mask]
             else:
@@ -745,10 +745,10 @@ def CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,reposition = 
             drs_cumdisp = surficial_data[drs_mask]['cumulative_displacement'].values
             
             ## Get L2 DRS points
-            drs_l2_history = (history_data.site_code == site) * (history_data.marker_name == marker) * (history_data.operation == 'l2') * (history_data.data_source == 'DRS')
+            drs_l2_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l2'),(history_data.data_source == 'DRS')))
             drs_l2_mask = np.array(map(lambda x: x in history_data[drs_l2_history].ts.values,drs_ts))
             
-            if drs_l2_mask != []:
+            if len(drs_l2_mask) != 0:
                 drs_l2_ts = drs_ts[drs_l2_mask]
                 drs_l2_cumdisp = drs_cumdisp[drs_l2_mask]
             else:
@@ -756,10 +756,10 @@ def CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,reposition = 
                 drs_l2_cumdisp = []
             
             ## Get L3 DRS points
-            drs_l3_history = (history_data.site_code == site) * (history_data.marker_name == marker) * (history_data.operation == 'l3') * (history_data.data_source == 'DRS')
+            drs_l3_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l3'),(history_data.data_source == 'DRS')))
             drs_l3_mask = np.array(map(lambda x: x in history_data[drs_l3_history].ts.values,drs_ts))
             
-            if drs_l3_mask != []:
+            if len(drs_l3_mask) != 0:
                 drs_l3_ts = drs_ts[drs_l3_mask]
                 drs_l3_cumdisp = drs_cumdisp[drs_l3_mask]
             else:
