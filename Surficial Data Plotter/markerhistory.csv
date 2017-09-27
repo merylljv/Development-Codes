@@ -35,6 +35,9 @@ ts,site_code,marker_name,operation,data_source,previous_name
 2016-10-10 11:00:00,MSL,F,l3,SMS,Nan
 2016-09-22 07:00:00,MSL,E,mute,SMS,Nan
 2016-09-25 09:00:00,MSL,E,mute,SMS,Nan
+2015-06-25 08:15:00,MSL,A,l2,DRS,Nan
+2016-01-26 12:00:00,MSL,C,l3,SMS,Nan
+2016-01-26 12:00:00,MSL,B,l3,SMS,Nan
 2015-07-02 06:54:00,MSL,A,rename,DRS,Liki A
 2015-07-03 06:54:00,MSL,B,rename,DRS,Liki B
 2015-07-04 06:54:00,MSL,C,rename,DRS,Liki C

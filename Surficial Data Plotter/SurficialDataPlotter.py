@@ -9,6 +9,7 @@ import os
 import pandas as pd
 import numpy as np
 from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
+import matplotlib.lines as mlines
 import time
 
 #### Global Parameters
@@ -22,7 +23,8 @@ tableau20 = [(31, 119, 180), (174, 199, 232), (255, 127, 14), (255, 187, 120),
 
 for i in range(len(tableau20)):    
     r, g, b = tableau20[i]    
-    tableau20[i] = (r / 255., g / 255., b / 255.)
+    tableau20[i] = (r / 255., g / 255., b / 255.)   
+
 
 global marker_history_edits
 marker_history_edits = pd.DataFrame(columns = ['ts','site_code','marker_name','operation','data_source'])
@@ -935,110 +937,346 @@ def ViewHistory(surficial_csv_file,history_csv_file):
                     fig_num += 1
                 plot_num = 1           
 
+def PrintCumulativeDisplacementPlot(surficial_csv_file,history_csv_file,fig_height,fig_width,num_plots_per_page):
+    #### Rename and read csv files
+    surficial_data = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
+    history_data = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
+    
+    #### Upper caps site_code, title form marker_name
+    UpperSiteCodeUpperMarkerName(surficial_data)
+    UpperSiteCodeUpperMarkerName(history_data)
+    
+    #### Rename markers
+    rename_history = history_data[history_data.operation == 'rename']
+    RenameMarkers(surficial_data,rename_history)
+    
+    #### Enable mute and reposition
+    mute = True
+    reposition = True
+    
+    #### Mute markers if mute = True
+    if mute:    
+        mute_history = history_data[history_data.operation == 'mute']
+        surficial_data = MuteMarkers(surficial_data,mute_history)        
+    
+    #Get dataframe columns
+    columns = surficial_data.columns.values    
+    
+    #### Compute for marker displacement consider repositioned markers if reposition = True
+    if reposition:    
+        reposition_history = history_data[history_data.operation == 'reposition']
+    else:
+        reposition_history = pd.DataFrame(columns=columns)
+    
+    surficial_data_group = surficial_data.groupby(['marker_name'],as_index = False)
+    surficial_data = surficial_data_group.apply(ComputeDisplacementMarker,reposition_history).reset_index()
+    
+    #### Add displacement and cumulative_displacement columns
+    columns = np.append(columns,['displacement','cumulative_displacement'])
+    surficial_data = surficial_data[columns]
+    
+    #### Determine sites and markers to plot
+    sites_to_plot = np.unique(surficial_data.site_code.values)
+    markers_to_plot = []
+    
+    print "Plotting {} site/s: {}\n".format(len(sites_to_plot),', '.join(sites_to_plot))    
+    
+    for site in sites_to_plot:
+        markers = np.unique(surficial_data.loc[surficial_data.site_code == site,['marker_name']].values)
+        print "Plotting {} marker/s for site {}: {}".format(len(markers),site,', '.join(markers))
+        markers_to_plot.append(markers)
+        
+    
+    #### Set initial figure number
+    fig_num = 0  
+    
+    for site, markers in zip(sites_to_plot,markers_to_plot):
+        
+        #### Set the number of plots per page
+        plots_per_page = num_plots_per_page
+        
+        #### Add fig every site, reset plot num to 1, reset axes      
+        fig_num += 1
+        plot_num = 1
+        all_plot_num = 0
+        cur_ax = None
+        
+        for marker in markers:
 
+            #### Set to minimum if number of markers to plot is less than plots_per_page
+            if len(markers) < plots_per_page:
+                plots_per_page = len(markers)
+            
+            #### Set correct figure and axes
+            cur_fig = plt.figure(fig_num)
+            cur_ax = cur_fig.add_subplot(plots_per_page,1,plot_num,sharex = cur_ax)
+            cur_ax.grid()
+            
+            #### Remove tickes for bottom and spines for top and bottom
+            cur_ax.tick_params(labelbottom = 'off',bottom = 'off')
+#            cur_ax.spines['top'].set_visible(False)
+#            cur_ax.spines['bottom'].set_visible(False)
+            
+            #### Set x and y labels
+            cur_fig.text(0.02,0.5,'Cumulative Displacement, cm',va='center',rotation = 'vertical',fontsize = 16)
+            cur_fig.text(0.5+0.02,0.04,'Timestamp',ha = 'center',fontsize = 17)
+            
+            #### Obtain data to plot
+            data_mask = np.logical_and(surficial_data.site_code == site,surficial_data.marker_name == marker)            
+            cur_ts_data = surficial_data[data_mask]['ts'].values            
+            cur_cumdisp_data = surficial_data[data_mask]['cumulative_displacement'].values
+            
+            ### SMS points
+            sms_mask = np.logical_and(data_mask,surficial_data.data_source == 'SMS')
+            sms_ts = surficial_data[sms_mask]['ts'].values
+            sms_cumdisp = surficial_data[sms_mask]['cumulative_displacement'].values
+            
+            ## Get L2 SMS points
+            sms_l2_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l2') , (history_data.data_source == 'SMS')))
+            sms_l2_mask = np.array(map(lambda x: x in history_data[sms_l2_history].ts.values,sms_ts))
+            
+            if len(sms_l2_mask) != 0:
+                sms_l2_ts = sms_ts[sms_l2_mask]
+                sms_l2_cumdisp = sms_cumdisp[sms_l2_mask]
+            else:
+                sms_l2_ts = []
+                sms_l2_cumdisp = []
+            
+            ## Get L3 SMS points
+            sms_l3_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)) , np.logical_and((history_data.operation == 'l3'),(history_data.data_source == 'SMS')))
+            sms_l3_mask = np.array(map(lambda x: x in history_data[sms_l3_history].ts.values,sms_ts))
+            
+            if len(sms_l3_mask) != 0:
+                sms_l3_ts = sms_ts[sms_l3_mask]
+                sms_l3_cumdisp = sms_cumdisp[sms_l3_mask]
+            else:
+                sms_l3_ts = []
+                sms_l2_cumdisp = []
+            
+            ### DRS points
+            drs_mask = np.logical_and(data_mask,surficial_data.data_source == 'DRS')
+            drs_ts = surficial_data[drs_mask]['ts'].values
+            drs_cumdisp = surficial_data[drs_mask]['cumulative_displacement'].values
+            
+            ## Get L2 DRS points
+            drs_l2_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l2'),(history_data.data_source == 'DRS')))
+            drs_l2_mask = np.array(map(lambda x: x in history_data[drs_l2_history].ts.values,drs_ts))
+            
+            if len(drs_l2_mask) != 0:
+                drs_l2_ts = drs_ts[drs_l2_mask]
+                drs_l2_cumdisp = drs_cumdisp[drs_l2_mask]
+            else:
+                drs_l2_ts = []
+                drs_l2_cumdisp = []
+            
+            ## Get L3 DRS points
+            drs_l3_history = np.logical_and(np.logical_and((history_data.site_code == site),(history_data.marker_name == marker)),np.logical_and((history_data.operation == 'l3'),(history_data.data_source == 'DRS')))
+            drs_l3_mask = np.array(map(lambda x: x in history_data[drs_l3_history].ts.values,drs_ts))
+            
+            if len(drs_l3_mask) != 0:
+                drs_l3_ts = drs_ts[drs_l3_mask]
+                drs_l3_cumdisp = drs_cumdisp[drs_l3_mask]
+            else:
+                drs_l3_ts = []
+                drs_l3_cumdisp = []
+
+                                        
+            #### Plot values to current axis
+            cur_ax.plot(cur_ts_data,cur_cumdisp_data,'o-',color = tableau20[all_plot_num*2%20],label = '{}'.format(marker),markersize = 3,lw = 0.75)
+            
+            #### Plot L2 points
+            for x,y in zip(sms_l2_ts,sms_l2_cumdisp):
+                cur_ax.plot(x,y,'s',color = tableau20[(all_plot_num*2+12)%20],markersize = 4.5,label = 'l2')
+            for i,j in zip(drs_l2_ts,drs_l2_cumdisp):
+                cur_ax.plot(i,j,'s',color = tableau20[(all_plot_num*2+12)%20],markersize = 4.5,label = 'l2')
+            
+            #### Plot L3 points
+            for x,y in zip(sms_l3_ts,sms_l3_cumdisp):
+                cur_ax.plot(x,y,'^',color = tableau20[(all_plot_num*2+16)%20],markersize = 5.5,label = 'l3')
+            for i,j in zip(drs_l3_ts,drs_l3_cumdisp):
+                cur_ax.plot(i,j,'^',color = tableau20[(all_plot_num*2+16)%20],markersize = 5.5,label = 'l3')
+            
+            #### Set xlim
+            x_range = abs(max(surficial_data['ts'].values) - min(surficial_data['ts'].values))
+            cur_ax.set_xlim(min(surficial_data['ts'].values) - 0.025*x_range,max(surficial_data['ts'].values) + (-0.018*fig_width+0.233)*x_range)
+            
+            #### Generate legends for L2 and L3 points
+            l2_point = mlines.Line2D([],[],color = tableau20[(all_plot_num*2+12)%20],marker = 's',markersize = 4.5,label = 'L2',linestyle = None, lw = 0)
+            l3_point = mlines.Line2D([],[],color = tableau20[(all_plot_num*2+16)%20],marker = '^',markersize = 5.5, label = 'L3',linestyle = None, lw = 0)
+            
+            ### Plot legend
+            legend = cur_ax.legend([l3_point,l2_point],['L3','L2'],loc = 'upper right',fontsize = 8,handletextpad = 0.1)
+            legend.get_frame().set_visible(False)
+            
+            
+            #### Set y axis formatter
+            cur_ax.yaxis.set_major_formatter(mpl.ticker.FormatStrFormatter('%.1f'))
+            
+            #### Set y axes label to be marker name
+            cur_ax.set_ylabel(marker,fontsize = 14,rotation = 0)
+            
+            #### Set y label position
+            cur_ax.yaxis.set_label_coords(0.02*fig_width-0.27,0.5)
+            
+            #### Set visible top spine for first subplot
+            if plot_num == 1:
+                cur_ax.spines['top'].set_visible(True)
+            
+            #### Set parameters for next plot page
+            plot_num += 1
+            all_plot_num += 1
+            if plot_num > plots_per_page or marker == markers[-1]:
+                
+                #### Show x-axis ticker at the last plot axes. Set the date format.
+                cur_ax.tick_params(labelbottom = 'on',bottom = 'on')
+                cur_ax.xaxis.set_major_formatter(md.DateFormatter('%d %b %Y'))
+                cur_ax.spines['bottom'].set_visible(True)
+                cur_fig.autofmt_xdate()
+                
+                
+
+                #### Get legend for all plots
+#                lines = []
+#                for ax in cur_ax.figure.get_axes():
+#                    for line in ax.get_lines():
+#                        if np.logical_not((line.get_label()[:3] == 'SMS')+(line.get_label()[:3] == 'DRS')+(line.get_label() == 'l2')+(line.get_label() == 'l3')):
+#                            lines.append(line)
+#                labels = [l.get_label() for l in lines]
+#                cur_fig.legend(lines,labels,'center right',fontsize = 15)                
+                cur_fig.suptitle('Cumulative Displacement Plot for Site {}'.format(site),fontsize = 17, x = 0.5 + 0.05)
+                                
+                #### Set plots per page to a minimum if number of markers to plot at the next page is less than plots per page
+                if len(markers) - all_plot_num < plots_per_page:
+                    plots_per_page = len(markers) - all_plot_num
+                
+                #### Set figure height and width and spacing
+                if marker != markers[-1]:
+                    cur_fig.set_figheight(fig_height)
+                    cur_fig.set_figwidth(fig_width)
+                    cur_fig.subplots_adjust(right = 0.95,top = 0.001667*fig_height + 0.91667,left = -0.015*fig_width + 0.29,bottom = -0.01167*fig_height + 0.258333,hspace = 0.05)
+                else:
+                    top_ratio = (1-(0.001667*fig_height + 0.91667)) / ((-0.01167*fig_height + 0.258333) + (1-(0.001667*fig_height + 0.91667)))
+                    fig_space = (0.001667*fig_height + 0.91667 - (-0.01167*fig_height + 0.258333))*fig_height
+                    text_space = fig_height - fig_space
+                    red_fig_space = (plot_num - 1)/float(num_plots_per_page) * fig_space
+                    fig_height = red_fig_space + text_space
+                    cur_fig.set_figheight(fig_height)
+                    cur_fig.set_figwidth(fig_width)
+                    text_space_ratio = text_space / fig_height
+                    top_space_ratio = top_ratio * text_space_ratio
+                    bottom_space_ratio = (1-top_ratio)*text_space_ratio
+                    cur_fig.subplots_adjust(right = 0.95,top = 1-top_space_ratio,left = -0.015*fig_width + 0.29,bottom = bottom_space_ratio,hspace = 0.05)
+                
+                #### Save fig
+                plt.savefig('{}/CDP plot for {} page {} {} by {}.png'.format(data_path,site,fig_num,fig_width,fig_height),dpi=320, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+                
+                if marker != markers[-1]:
+                    fig_num += 1
+                plot_num = 1         
+                
 ######################################
 #############    MAIN    #############
 ######################################
-print "\n\n########################################################################"
-print "##      Surficial Marker Measurements Plotter and History Writer      ##"
-print "########################################################################\n"
-
-while True:
-    sur_input = raw_input("Input surficial data csv filename: ")
-    
-    if sur_input[-4:] == '.csv':
-        surficial_csv_file = sur_input[:-4]
-    elif len(sur_input) == 0:
-        pass
-    else:
-        surficial_csv_file = sur_input
-
-
-    try:
-        df = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
-        break
-    except:
-        print "Error in the filename/directory."
-
-while True:
-    his_input = raw_input("Input marker history data csv filename: ")
-    
-    if his_input[-4:] == '.csv':
-        history_csv_file = his_input[:-4]
-    elif len(his_input) == 0:
-        pass
-    else:
-        history_csv_file = his_input
-
-    try:
-        df = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
-        break
-    except:
-        print "Error in the filename/directory."
-
-while True:
-    
-    print "\n\n#################################################"
-    print "#####   Choose among the following modes:   #####"
-    print "#################################################"
-    print "\n\nSMP (Surficial Measurements Plot) - marker measurements plotted versus timestamp, SMS & DRS data are discriminated.\n"
-    print "CDP (Cumulative Displacement Plot) - cumulative displacement plotted versus timestamp."
-    print "\nMHP (Marker History Plot) - marker measurements plotted versus timestamp, SMS & DRS as well as historical data points are discriminated.\n\n"
-    
-    mode = raw_input("(SMP, CDP, MHP):")
-    mode = mode.upper()
-    
-    if mode in ['SMP','CDP','MHP']:
-        break
-    else:
-        print "Choose from the following options (SMP, CDP, MHP):"
-        continue
-
-if mode == 'SMP' or mode == 'CDP':
-    mute = raw_input("Hide muted points (Y/N)? (default is Y):")
-    if mute.upper() == 'Y':
-        mute = True
-    elif mute.upper() == 'N':
-        mute = False
-    else:
-        mute = True
-
-    if mode == 'CDP':
-        reposition = raw_input("Set displacement to zero for repositioned points (Y/N)? (default is Y):")
-        if reposition.upper() == 'Y':
-            reposition = True
-        elif reposition.upper() == 'N':
-            reposition = False
-        else:
-            reposition = True
-
-print "\n\nEntering {} mode".format(mode)
-for i in range(10):
-    print "."
-    time.sleep(0.1)
-
-if mode == 'SMP':
-    SurficialDataPlot(surficial_csv_file,history_csv_file,mute)
-elif mode == 'CDP':
-    CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,mute,reposition)
-elif mode == 'MHP':
-    ViewHistory(surficial_csv_file,history_csv_file)
-
-print "\n\n----------------------------------------------------------"
-print "General commands while in interactive mode:\n"
-print "Alt + Click: Propose to MUTE the datapoint"
-print "Ctrl + Click: Propose to REPOSITION the datapoint"
-if mode == 'MHP' or mode == 'CDP':
-    print "Delete + Click: Propose to DELETE history of the data point"
-    if mode == 'CDP':
-        print "Z + Click: Propose to SET L2 as history of the data point"
-        print "X + CLick: Propose to SET L3 as history of the data point"
-print "D + Click: UNDO any edit to the datapoint"
-print "R: Refresh all proposed history"
-print "Q: View all pending edits"
-print "C: Reset view"
-print "S: Save figure (current view)"
-print "Enter: Save & write edits to history csv file"
-print "----------------------------------------------------------"
-    
-    
+#print "\n\n########################################################################"
+#print "##      Surficial Marker Measurements Plotter and History Writer      ##"
+#print "########################################################################\n"
+#
+#while True:
+#    sur_input = raw_input("Input surficial data csv filename: ")
+#    
+#    if sur_input[-4:] == '.csv':
+#        surficial_csv_file = sur_input[:-4]
+#    elif len(sur_input) == 0:
+#        pass
+#    else:
+#        surficial_csv_file = sur_input
+#
+#
+#    try:
+#        df = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
+#        break
+#    except:
+#        print "Error in the filename/directory."
+#
+#while True:
+#    his_input = raw_input("Input marker history data csv filename: ")
+#    
+#    if his_input[-4:] == '.csv':
+#        history_csv_file = his_input[:-4]
+#    elif len(his_input) == 0:
+#        pass
+#    else:
+#        history_csv_file = his_input
+#
+#    try:
+#        df = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
+#        break
+#    except:
+#        print "Error in the filename/directory."
+#
+#while True:
+#    
+#    print "\n\n#################################################"
+#    print "#####   Choose among the following modes:   #####"
+#    print "#################################################"
+#    print "\n\nSMP (Surficial Measurements Plot) - marker measurements plotted versus timestamp, SMS & DRS data are discriminated.\n"
+#    print "CDP (Cumulative Displacement Plot) - cumulative displacement plotted versus timestamp."
+#    print "\nMHP (Marker History Plot) - marker measurements plotted versus timestamp, SMS & DRS as well as historical data points are discriminated.\n\n"
+#    
+#    mode = raw_input("(SMP, CDP, MHP):")
+#    mode = mode.upper()
+#    
+#    if mode in ['SMP','CDP','MHP']:
+#        break
+#    else:
+#        print "Choose from the following options (SMP, CDP, MHP):"
+#        continue
+#
+#if mode == 'SMP' or mode == 'CDP':
+#    mute = raw_input("Hide muted points (Y/N)? (default is Y):")
+#    if mute.upper() == 'Y':
+#        mute = True
+#    elif mute.upper() == 'N':
+#        mute = False
+#    else:
+#        mute = True
+#
+#    if mode == 'CDP':
+#        reposition = raw_input("Set displacement to zero for repositioned points (Y/N)? (default is Y):")
+#        if reposition.upper() == 'Y':
+#            reposition = True
+#        elif reposition.upper() == 'N':
+#            reposition = False
+#        else:
+#            reposition = True
+#
+#print "\n\nEntering {} mode".format(mode)
+#for i in range(10):
+#    print "."
+#    time.sleep(0.1)
+#
+#if mode == 'SMP':
+#    SurficialDataPlot(surficial_csv_file,history_csv_file,mute)
+#elif mode == 'CDP':
+#    CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,mute,reposition)
+#elif mode == 'MHP':
+#    ViewHistory(surficial_csv_file,history_csv_file)
+#
+#print "\n\n----------------------------------------------------------"
+#print "General commands while in interactive mode:\n"
+#print "Alt + Click: Propose to MUTE the datapoint"
+#print "Ctrl + Click: Propose to REPOSITION the datapoint"
+#if mode == 'MHP' or mode == 'CDP':
+#    print "Delete + Click: Propose to DELETE history of the data point"
+#    if mode == 'CDP':
+#        print "Z + Click: Propose to SET L2 as history of the data point"
+#        print "X + CLick: Propose to SET L3 as history of the data point"
+#print "D + Click: UNDO any edit to the datapoint"
+#print "R: Refresh all proposed history"
+#print "Q: View all pending edits"
+#print "C: Reset view"
+#print "S: Save figure (current view)"
+#print "Enter: Save & write edits to history csv file"
+#print "----------------------------------------------------------"
+#    
+#    
