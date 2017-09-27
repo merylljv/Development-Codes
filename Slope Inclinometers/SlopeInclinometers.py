@@ -45,7 +45,7 @@ tableau20 = [(31, 119, 180), (174, 199, 232), (255, 127, 14), (255, 187, 120),
              (188, 189, 34), (219, 219, 141), (23, 190, 207), (158, 218, 229)]
 
 for i in range(len(tableau20)):    
-    r, g, b = tableau20[i]    
+    r, g, b = tableau20[i]
     tableau20[i] = (r / 255., g / 255., b / 255.)
 
 cm = plt.get_cmap('plasma')
@@ -56,8 +56,10 @@ plasma = cm.colors
 ### Use 30 days for colpos and disp analysis or 3 days for velocity analysis
 vel_event_window = pd.Timedelta(3,'D')
 event_window = pd.Timedelta(30,'D')
-colpos_interval = 2 ### in days
+colpos_interval_days = 4/24. ### in days
+colpos_interval_hours = colpos_interval_days*24 ### in hours
 window = 3 ### in days
+transparency = 0.5 ### Set transparency for colpos plots
 window = pd.Timedelta(window,'D')
 threshold_file = 'threshold.csv'
 threshold_type = 'on onset'
@@ -273,10 +275,10 @@ def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False)
     window, config = rtw.getwindow(pd.to_datetime(event_timestamp[-1]))
     window.start = pd.to_datetime(event_timestamp[0])
     window.offsetstart = window.start - timedelta(days=(config.io.num_roll_window_ops*window.numpts-1)/48.)
-    config.io.col_pos_interval = str(int(colpos_interval)) + 'D'
-    config.io.num_col_pos = int((window.end - window.start).days/colpos_interval + 1)
+    config.io.col_pos_interval = str(int(colpos_interval_hours)) + 'h'
+    config.io.num_col_pos = int((window.end - window.start).days/colpos_interval_days + 1)
     monitoring = gp.genproc(col[0], window, config, config.io.column_fix,comp_vel = compute_vel)
-    print monitoring
+
     #### Get colname, num nodes and segment length
     num_nodes = monitoring.colprops.nos
     seg_len = monitoring.colprops.seglen
@@ -342,7 +344,7 @@ def PlotIncrementalDisplacement(colposdf,sensor_column,zeroed = False,zoomin=Fal
         cur_xy = cur_df['xy'].values * 1000
         
         #### Plot values write label to xz plot only
-        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 1.25,markersize = 10,label = ts.strftime("%d %b '%y"))
+        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 1.25,markersize = 10,label = ts.strftime("%d %b '%y %H:%M"))
         ax_xy.plot(cur_xy,cur_depth,'.-',lw = 1.25,markersize = 10)
         
         
@@ -410,7 +412,7 @@ def PlotIncrementalDisplacement(colposdf,sensor_column,zeroed = False,zoomin=Fal
     
     #### Set fig size, borders and spacing
     fig.set_figheight(9)
-    fig.set_figwidth(8)
+    fig.set_figwidth(11.5)
     fig.subplots_adjust(right = 0.795,top = 0.925,left = 0.100)
     
     #### Set save path
@@ -458,8 +460,8 @@ def PlotCumulativeDisplacementPlot(colposdf,sensor_column,zeroed = False):
         cur_xy = cur_df['cum_xy'].values * 1000
         
         #### Plot values write label to xz plot only
-        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 1.25,markersize = 10,label = ts.strftime("%d %b '%y"))
-        ax_xy.plot(cur_xy,cur_depth,'.-',lw = 1.25,markersize = 10)
+        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 1.25,markersize = 10,label = ts.strftime("%d %b '%y %H:%M"),alpha = transparency)
+        ax_xy.plot(cur_xy,cur_depth,'.-',lw = 1.25,markersize = 10,alpha = transparency)
         
         
         #### Contain all plots in 'plots' variable
@@ -521,7 +523,7 @@ def PlotCumulativeDisplacementPlot(colposdf,sensor_column,zeroed = False):
 
     #### Set fig size, borders and spacing
     fig.set_figheight(9)
-    fig.set_figwidth(8)
+    fig.set_figwidth(11.5)
     fig.subplots_adjust(right = 0.795,top = 0.925,left = 0.100)
     
     #### Set save path
