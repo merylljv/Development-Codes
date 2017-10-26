@@ -1159,10 +1159,10 @@ def PrintCumulativeDisplacementPlot(surficial_csv_file,history_csv_file,fig_heig
                     fig_space = (0.001667*fig_height + 0.91667 - (-0.01167*fig_height + 0.258333))*fig_height
                     text_space = fig_height - fig_space
                     red_fig_space = (plot_num - 1)/float(num_plots_per_page) * fig_space
-                    fig_height = red_fig_space + text_space
-                    cur_fig.set_figheight(fig_height)
+                    last_fig_height = red_fig_space + text_space
+                    cur_fig.set_figheight(last_fig_height)
                     cur_fig.set_figwidth(fig_width)
-                    text_space_ratio = text_space / fig_height
+                    text_space_ratio = text_space / last_fig_height
                     top_space_ratio = top_ratio * text_space_ratio
                     bottom_space_ratio = (1-top_ratio)*text_space_ratio
                     cur_fig.subplots_adjust(right = 0.95,top = 1-top_space_ratio,left = -0.015*fig_width + 0.29,bottom = bottom_space_ratio,hspace = 0.05)
@@ -1170,113 +1170,197 @@ def PrintCumulativeDisplacementPlot(surficial_csv_file,history_csv_file,fig_heig
                 #### Save fig
                 plt.savefig('{}/CDP plot for {} page {} {} by {}.png'.format(data_path,site,fig_num,fig_width,fig_height),dpi=320, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
                 
+                print "\n\nSUCCESS!"
+                print "Plot saved as: {}/CDP plot for {} page {} {} by {}.png".format(data_path,site,fig_num,fig_width,fig_height)
+                
                 if marker != markers[-1]:
                     fig_num += 1
                 plot_num = 1         
-                
-######################################
-#############    MAIN    #############
-######################################
-#print "\n\n########################################################################"
-#print "##      Surficial Marker Measurements Plotter and History Writer      ##"
-#print "########################################################################\n"
-#
-#while True:
-#    sur_input = raw_input("Input surficial data csv filename: ")
+
+#def PrintSuperimposedCumulativeDisplacementPlot(surficial_csv_file,history_csv_file,fig_height,fig_width):
 #    
-#    if sur_input[-4:] == '.csv':
-#        surficial_csv_file = sur_input[:-4]
-#    elif len(sur_input) == 0:
-#        pass
+#    #### Rename and read csv files
+#    surficial_data = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
+#    history_data = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
+#    
+#    #### Upper caps site_code, title form marker_name
+#    UpperSiteCodeUpperMarkerName(surficial_data)
+#    UpperSiteCodeUpperMarkerName(history_data)
+#    
+#    #### Rename markers
+#    rename_history = history_data[history_data.operation == 'rename']
+#    RenameMarkers(surficial_data,rename_history)
+#    
+#    #### Enable mute and reposition
+#    mute = True
+#    reposition = True
+#    
+#    #### Mute markers if mute = True
+#    if mute:    
+#        mute_history = history_data[history_data.operation == 'mute']
+#        surficial_data = MuteMarkers(surficial_data,mute_history)        
+#    
+#    #Get dataframe columns
+#    columns = surficial_data.columns.values    
+#    
+#    #### Compute for marker displacement consider repositioned markers if reposition = True
+#    if reposition:    
+#        reposition_history = history_data[history_data.operation == 'reposition']
 #    else:
-#        surficial_csv_file = sur_input
-#
-#
-#    try:
-#        df = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
-#        break
-#    except:
-#        print "Error in the filename/directory."
-#
-#while True:
-#    his_input = raw_input("Input marker history data csv filename: ")
+#        reposition_history = pd.DataFrame(columns=columns)
 #    
-#    if his_input[-4:] == '.csv':
-#        history_csv_file = his_input[:-4]
-#    elif len(his_input) == 0:
-#        pass
-#    else:
-#        history_csv_file = his_input
-#
-#    try:
-#        df = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
-#        break
-#    except:
-#        print "Error in the filename/directory."
-#
-#while True:
+#    surficial_data_group = surficial_data.groupby(['marker_name'],as_index = False)
+#    surficial_data = surficial_data_group.apply(ComputeDisplacementMarker,reposition_history).reset_index()
 #    
-#    print "\n\n#################################################"
-#    print "#####   Choose among the following modes:   #####"
-#    print "#################################################"
-#    print "\n\nSMP (Surficial Measurements Plot) - marker measurements plotted versus timestamp, SMS & DRS data are discriminated.\n"
-#    print "CDP (Cumulative Displacement Plot) - cumulative displacement plotted versus timestamp."
-#    print "\nMHP (Marker History Plot) - marker measurements plotted versus timestamp, SMS & DRS as well as historical data points are discriminated.\n\n"
+#    #### Add displacement and cumulative_displacement columns
+#    columns = np.append(columns,['displacement','cumulative_displacement'])
+#    surficial_data = surficial_data[columns]
 #    
-#    mode = raw_input("(SMP, CDP, MHP):")
-#    mode = mode.upper()
+#    #### Determine sites and markers to plot
+#    sites_to_plot = np.unique(surficial_data.site_code.values)
+#    markers_to_plot = []
 #    
-#    if mode in ['SMP','CDP','MHP']:
-#        break
-#    else:
-#        print "Choose from the following options (SMP, CDP, MHP):"
-#        continue
-#
-#if mode == 'SMP' or mode == 'CDP':
-#    mute = raw_input("Hide muted points (Y/N)? (default is Y):")
-#    if mute.upper() == 'Y':
-#        mute = True
-#    elif mute.upper() == 'N':
-#        mute = False
-#    else:
-#        mute = True
-#
-#    if mode == 'CDP':
-#        reposition = raw_input("Set displacement to zero for repositioned points (Y/N)? (default is Y):")
-#        if reposition.upper() == 'Y':
-#            reposition = True
-#        elif reposition.upper() == 'N':
-#            reposition = False
-#        else:
-#            reposition = True
-#
-#print "\n\nEntering {} mode".format(mode)
-#for i in range(10):
-#    print "."
-#    time.sleep(0.1)
-#
-#if mode == 'SMP':
-#    SurficialDataPlot(surficial_csv_file,history_csv_file,mute)
-#elif mode == 'CDP':
-#    CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,mute,reposition)
-#elif mode == 'MHP':
-#    ViewHistory(surficial_csv_file,history_csv_file)
-#
-#print "\n\n----------------------------------------------------------"
-#print "General commands while in interactive mode:\n"
-#print "Alt + Click: Propose to MUTE the datapoint"
-#print "Ctrl + Click: Propose to REPOSITION the datapoint"
-#if mode == 'MHP' or mode == 'CDP':
-#    print "Delete + Click: Propose to DELETE history of the data point"
-#    if mode == 'CDP':
-#        print "Z + Click: Propose to SET L2 as history of the data point"
-#        print "X + CLick: Propose to SET L3 as history of the data point"
-#print "D + Click: UNDO any edit to the datapoint"
-#print "R: Refresh all proposed history"
-#print "Q: View all pending edits"
-#print "C: Reset view"
-#print "S: Save figure (current view)"
-#print "Enter: Save & write edits to history csv file"
-#print "----------------------------------------------------------"
+#    print "Plotting {} site/s: {}\n".format(len(sites_to_plot),', '.join(sites_to_plot))    
 #    
+#    for site in sites_to_plot:
+#        markers = np.unique(surficial_data.loc[surficial_data.site_code == site,['marker_name']].values)
+#        print "Plotting {} marker/s for site {}: {}".format(len(markers),site,', '.join(markers))
+#        markers_to_plot.append(markers)
+#        
 #    
+#    #### Set initial figure number
+#    fig_num = 0  
+
+#####################################
+############    MAIN    #############
+#####################################
+print "\n\n########################################################################"
+print "##      Surficial Marker Measurements Plotter and History Writer      ##"
+print "########################################################################\n"
+
+while True:
+    sur_input = raw_input("Input surficial data csv filename: ")
+    
+    if sur_input[-4:] == '.csv':
+        surficial_csv_file = sur_input[:-4]
+    elif len(sur_input) == 0:
+        pass
+    else:
+        surficial_csv_file = sur_input
+
+
+    try:
+        df = pd.read_csv(data_path + '/'+surficial_csv_file +'.csv')
+        break
+    except:
+        print "Error in the filename/directory."
+
+while True:
+    his_input = raw_input("Input marker history data csv filename: ")
+    
+    if his_input[-4:] == '.csv':
+        history_csv_file = his_input[:-4]
+    elif len(his_input) == 0:
+        pass
+    else:
+        history_csv_file = his_input
+
+    try:
+        df = pd.read_csv(data_path + '/'+history_csv_file +'.csv')
+        break
+    except:
+        print "Error in the filename/directory."
+
+while True:
+    
+    print "\n\n#################################################"
+    print "#####   Choose among the following modes:   #####"
+    print "#################################################"
+    print "\n\nSMP (Surficial Measurements Plot) - marker measurements plotted versus timestamp, SMS & DRS data are discriminated.\n"
+    print "CDP (Cumulative Displacement Plot) - cumulative displacement plotted versus timestamp."
+    print "\nMHP (Marker History Plot) - marker measurements plotted versus timestamp, SMS & DRS as well as historical data points are discriminated."
+    print "\nPCDP (Print Cumulative Displacement Plot) - print the finished cumulative displacement plot.\n\n"
+    
+    mode = raw_input("(SMP, CDP, MHP, PCDP):")
+    mode = mode.upper()
+    
+    if mode in ['SMP','CDP','MHP','PCDP']:
+        break
+    else:
+        print "Choose from the following options (SMP, CDP, MHP,PCDP):"
+        continue
+
+if mode == 'SMP' or mode == 'CDP':
+    mute = raw_input("Hide muted points (Y/N)? (default is Y):")
+    if mute.upper() == 'Y':
+        mute = True
+    elif mute.upper() == 'N':
+        mute = False
+    else:
+        mute = True
+
+    if mode == 'CDP':
+        reposition = raw_input("Set displacement to zero for repositioned points (Y/N)? (default is Y):")
+        if reposition.upper() == 'Y':
+            reposition = True
+        elif reposition.upper() == 'N':
+            reposition = False
+        else:
+            reposition = True
+            
+if mode == 'PCDP':
+    
+    fig_height = raw_input("Input desired fig height (Recommended ~ 11 inches):")
+    
+    try:
+        fig_height = float(fig_height)
+    except:
+        fig_height = 11
+    
+    fig_width = raw_input("Input desired fig height (Recommended ~ 8.5 inches):")
+    
+    try:
+        fig_width = float(fig_width)
+    except:
+        fig_width = 8.50
+    
+    num_plots_per_page = raw_input("Input desired number of plots per page (Recommended ~ 6 plots per page):")
+    
+    try:
+        num_plots_per_page = int(num_plots_per_page)
+    except:
+        num_plots_per_page = 6
+    
+print "\n\nEntering {} mode".format(mode)
+for i in range(10):
+    print "."
+    time.sleep(0.1)
+
+if mode == 'SMP':
+    SurficialDataPlot(surficial_csv_file,history_csv_file,mute)
+elif mode == 'CDP':
+    CumulativeDisplacementPlot(surficial_csv_file,history_csv_file,mute,reposition)
+elif mode == 'MHP':
+    ViewHistory(surficial_csv_file,history_csv_file)
+elif mode == 'PCDP':
+    PrintCumulativeDisplacementPlot(surficial_csv_file,history_csv_file,fig_height,fig_width,num_plots_per_page)
+
+if mode != 'PCDP':
+    print "\n\n----------------------------------------------------------"
+    print "General commands while in interactive mode:\n"
+    print "Alt + Click: Propose to MUTE the datapoint"
+    print "Ctrl + Click: Propose to REPOSITION the datapoint"
+    if mode == 'MHP' or mode == 'CDP':
+        print "Delete + Click: Propose to DELETE history of the data point"
+        if mode == 'CDP':
+            print "Z + Click: Propose to SET L2 as history of the data point"
+            print "X + CLick: Propose to SET L3 as history of the data point"
+    print "D + Click: UNDO any edit to the datapoint"
+    print "R: Refresh all proposed history"
+    print "Q: View all pending edits"
+    print "C: Reset view"
+    print "S: Save figure (current view)"
+    print "Enter: Save & write edits to history csv file"
+    print "----------------------------------------------------------"
+    
+    
