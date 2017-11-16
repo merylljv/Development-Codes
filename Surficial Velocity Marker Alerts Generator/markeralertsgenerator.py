@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
 from scipy import stats
 from datetime import datetime, timedelta
 from scipy.interpolate import UnivariateSpline
@@ -61,7 +62,7 @@ def nonrepeat_colors(ax,NUM_COLORS,color='gist_rainbow'):
     return ax
 
 
-def GetAllMarkerData():
+def GetAllMarkerData(mode = 'MySQL'):
     """
     Function to obtain all marker data from the database
     
@@ -75,11 +76,14 @@ def GetAllMarkerData():
     All marker data from the database
     """
     
-    #### Write query
-    query = "SELECT timestamp, site_id, crack_id, meas FROM gndmeas WHERE timestamp >= '2014-01-01' ORDER by timestamp desc"
-    
-    #### Get data from database
-    df = q.GetDBDataFrame(query)
+    if mode == 'MySQL':
+        #### Write query
+        query = "SELECT timestamp, site_id, crack_id, meas FROM gndmeas WHERE timestamp >= '2014-01-01' ORDER by timestamp desc"
+        
+        #### Get data from database
+        df = q.GetDBDataFrame(query)
+    elif mode == 'csv':
+        df = pd.read_csv('gndmeas.csv')
     
     return df
 
@@ -114,7 +118,7 @@ def ComputeKinematicParameters(marker_data):
     
     return marker_data
 
-def GenerateKinematicsData():
+def GenerateKinematicsData(mode = 'MySQL'):
     """
     Generates the surficial ground marker kinematics, computes for displacement, velocity and time interval
 
@@ -131,7 +135,10 @@ def GenerateKinematicsData():
     """
     
     #### Get marker data from database
-    marker_data = GetAllMarkerData()
+    marker_data = GetAllMarkerData(mode)
+    
+    #### Convert timestamp row into timestamp
+    marker_data['timestamp'] = pd.to_datetime(marker_data['timestamp'])
     
     #### Upper case the site codes
     marker_data['site_id'] = map(lambda x:str(x).upper(),marker_data['site_id'])
@@ -301,7 +308,52 @@ def MarkVelocityThresholdPredictions(marker_kinematics_with_condition,velocity_t
     return marker_kinematics_with_prediction
 
 #def MarkOOAThresholdPredictions(marker_kinematics_with_condition,confidence_level,time_within):
-#    
+
+def MarkCutOffPredictions(marker_kinematics_with_condition,parameter_name,cut_off_value):
+    """
+    Returns the marker kinematics data with corresponding cut off conditions based on cut off value
+
+    
+    Parameters
+    ------------------
+    marker_kinematics_with_condition: pd.DataFrame() 
+        Computed kinematic data marked with corresponding condition
+    parameter_name: string
+        Name of cut off parameter
+    cut_off_value: float
+        Cut off value for the parameter
+
+        
+    Returns
+    -------------------
+    marker_kinematics_with_cut_off: pd.DataFrame() with additional column ['cut off'], 1 for positive, -1 for negative
+        
+    """
+    
+    #### Positive predictions are those that exceeded the cut off threshold
+    marker_kinematics_with_condition['cutoff'] = np.array(marker_kinematics_with_condition[parameter_name].values >= cut_off_value)*2 - 1
+    
+    return marker_kinematics_with_condition
+
+def CombinePredictionAndCutOff(marker_kinematics_with_condition):
+    """
+    Returns the marker kinematics data with combined prediction from cutoff and parameter
+
+    
+    Parameters
+    ------------------
+    marker_kinematics_with_condition: pd.DataFrame() 
+        Computed kinematic data marked with corresponding condition
+        
+    Returns
+    -------------------
+    marker_kinematics_with_cut_off: pd.DataFrame() with combined prediction column ['prediction'], 1 for positive, -1 for negative
+        
+    """
+    
+    marker_kinematics_with_condition['prediction'] = 0.5 * (marker_kinematics_with_condition['prediction'].values + 1) * (marker_kinematics_with_condition['cutoff'].values + 1) - 1
+    
+    return marker_kinematics_with_condition
 
 def ComputePredictionRates(marker_kinematics_with_prediction):
     """
@@ -622,6 +674,9 @@ def PlotROCSplinePrediction(marker_kinematics,time_within,confidence_threshold_r
         true_positive_rates.append(prediction_rates['tpr'])
         false_positive_rates.append(prediction_rates['fpr'])
     
+    #### Compute for AUC ROC
+    auc = np.trapz(true_positive_rates,false_positive_rates)
+    
     #### Plot results
     
     #### Initialize figure, open the subplot
@@ -633,6 +688,10 @@ def PlotROCSplinePrediction(marker_kinematics,time_within,confidence_threshold_r
     
     #### Plot the guess line
     ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    
+    #### Print AUC ROC result
+    auc_text = 'Area under the ROC = {}'.format(round(auc,4))
+    ax.add_artist(AnchoredText(auc_text,prop=dict(size=12), frameon=False,loc = 4))
     
     #### Plot the legend
     plt.legend(loc = 'upper right')
@@ -651,8 +710,13 @@ def PlotROCSplinePrediction(marker_kinematics,time_within,confidence_threshold_r
     #### Set aspect as equal
     ax.set_aspect('equal')
     
+    #### Set save path
+    save_path = "{}\ROC\\OOA".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+        
     #### Save fig
-    plt.savefig('ROC OOA Threshold Min {} Max {} N {}.png'.format(round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    plt.savefig('{}\\ROC OOA Threshold Min {} Max {} N {}.png'.format(save_path,round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
 def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     """
@@ -687,23 +751,52 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     #### Get only non-zero displacement values
     marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
     
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
     #### Get false positive rates and true positive rates and corresponding thresholds
     fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
     
+    #### Record results to data frame
+    roc_results = pd.DataFrame({'tpr':tpr,'fpr':fpr,'threshold':thresholds})
+    
+    #### Compute for Youden Index
+    roc_results['yi'] = tpr - fpr
+        
+    #### Get maximum Youden Index
+    max_YI = max(roc_results.yi)
+    
+    #### Get threshold with maximum YI
+    optimized_threshold = roc_results[roc_results.yi == max_YI].threshold.values[-1]
+    
+    #### Get fpr and tpr of maximum YI
+    optimized_fpr = roc_results[roc_results.threshold == optimized_threshold].fpr.values[0]
+    optimized_tpr = roc_results[roc_results.threshold == optimized_threshold].tpr.values[0]
+    
+    #### Get AUC ROC value
+    auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+
     #### Plot results
     
     #### Initialize figure, open subplot
     fig = plt.figure()
     ax = fig.add_subplot(111)
+        
+    #### Plot random guess line
+    random_guess_line, = ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
     
     #### Plot fpr vs tpr
-    ax.plot(fpr,tpr,label = '{} Threshold'.format(parameter_name.title()))
+    roc_line, = ax.plot(fpr,tpr,label = '{} Threshold'.format(parameter_name.title()))
     
-    #### Plot random guess line
-    ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    #### Plot Max YI line
+    ax.plot(np.ones(1000)*optimized_fpr,np.linspace(optimized_fpr,optimized_tpr,1000),'--',color = tableau20[16])
+    max_yi_line, = ax.plot([optimized_fpr],[optimized_tpr],'o--',color = tableau20[16],label = 'Max YI',markersize = 4)
+    
+    #### Print AUC ROC result
+    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
     
     #### Plot the legend
-    plt.legend(loc = 'upper right')
+    plt.legend(handles = [roc_line,random_guess_line,max_yi_line],loc = 'upper right')
     
     #### Set axis labels
     ax.set_xlabel('False Positive Rates',fontsize = 14)
@@ -718,11 +811,146 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     
     #### Set aspect as equal
     ax.set_aspect('equal')
+  
+    #### Set save path
+    save_path = "{}\ROC\\Arbitrary Parameter".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
     
     #### Save fig
-    plt.savefig('{}\ROC\{} Threshold.png'.format(data_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    plt.savefig('{}\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,parameter_name,cut_off_parameter_name,cut_off_threshold_range):
+    """
+    Plots the ROC of a given parameter in the marker_kinematics data along with another parameter along a cut off threshold
+
     
-def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,confidence_threshold_range,parameter_name,parameter_threshold_range):
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() 
+        Marker kinematics data frame
+    time_within: float
+        Time in hours in which the next measurement is made
+    parameter_name: string
+        name of the parameter whose ROC is to be plotted
+    cut_off_parameter_name: string
+        name of cut off parameter
+    cut_off_threshold_range: np.arange
+        threshold range for the cut off parameter
+        
+        
+    Returns
+    -------------------
+    None: Plots ROC and saves to ROC folder
+        
+    """
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+    
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Initialize figure, open subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot random guess line
+    ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+
+    #### Set non-repeating colors
+    ax = nonrepeat_colors(ax,len(cut_off_threshold_range),color = 'plasma')
+    
+    #### Initialize auc results container
+    auc_scores = []
+    
+    for cut_off_threshold in cut_off_threshold_range:
+        
+        #### Cut off parameter threshold
+        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition[cut_off_parameter_name] >= cut_off_threshold]
+        
+        #### Get false positive rates and true positive rates and corresponding thresholds
+        fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+        
+        #### Get AUC
+        auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+        
+        #### Append to results container
+        auc_scores.append(auc)
+        
+        #### Plot results
+        
+        #### Plot fpr vs tpr
+        ax.plot(fpr,tpr)
+                
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('ROC Plot for {} Threshold With {} Cut Off'.format(parameter_name.title(),cut_off_parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+    
+    #### Set save path
+    save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\ROC".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+    
+    #### Save fig
+    plt.savefig('{}\{} Threshold With {} Min {} Max {} N {}.png'.format(save_path,parameter_name.title(),cut_off_parameter_name.title(),round(min(cut_off_threshold_range),4),round(max(cut_off_threshold_range),4),len(cut_off_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    #### Plot AUC vs cut off threshold curve
+    
+    #### Initialize figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot grid
+    ax.grid()
+    
+    #### Plot results
+    ax.scatter(cut_off_threshold_range,auc_scores,c = cut_off_threshold_range, cmap = 'plasma',s = 12,zorder = 3)
+    
+    #### Indicate maximum AUC
+    auc_max = round(max(auc_scores),4)
+    
+    #### Print max AUC
+    auc_max_text = 'Max AUC = {}'.format(auc_max)
+    ax.add_artist(AnchoredText(auc_max_text,prop=dict(size=10), frameon=False,loc = 4))
+    
+    #### Set axis labels
+    ax.set_xlabel('{}'.format(cut_off_parameter_name.title()),fontsize = 14)
+    ax.set_ylabel('Area under the ROC',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('AUC for {} vs {} Cut Off'.format(parameter_name.title(),cut_off_parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(6)
+    fig.set_figwidth(8)
+
+    #### Set save path
+    save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\AUC".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')
+
+    #### Save fig
+    plt.savefig('{}\AUC of {} vs {} Min {} Max {} N {}.png'.format(save_path,parameter_name.title(),cut_off_parameter_name.title(),round(min(cut_off_threshold_range),4),round(max(cut_off_threshold_range),4),len(cut_off_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+
+def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,confidence_threshold_range,parameter_name,parameter_threshold_range,mode = 'combine'):
     """
     Plots the ROC using the given confidence threshold range with the kinematics data frame and specified time interval combined with a parameter threshold cut off
 
@@ -739,6 +967,9 @@ def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,
         Column in the marker_kinematics data frame to be use as threshold
     parameter_threshold_range: np.array
         Value range for the parameter threshold
+    mode: string
+        Mode of cut off threshold, may be 'combine' which uses the threshold as another parameter
+        or 'define' cut off threshold is incorporated in the definition of alert hence reducing condition cases
         
     Returns
     -------------------
@@ -754,7 +985,9 @@ def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,
     
 #    #### Get spline computations
 #    marker_kinematics_with_condition = MarkerSplineComputations(marker_kinematics_with_condition)
-
+    
+    #### Initialize AUC score container
+    auc_scores = []
     
     #### Initialize figure, open the subplot
     fig = plt.figure()
@@ -780,15 +1013,23 @@ def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,
             #### Get marker kinematics with prediction data frame
             marker_kinematics_with_prediction = ComputeSplinePredictionRates(marker_kinematics_with_condition,confidence_level)
             
+            if mode == 'combine':
+                #### Mark cut off predictions
+                marker_kinematics_with_prediction = MarkCutOffPredictions(marker_kinematics_with_prediction,parameter_name,parameter_threshold)
+                
+                #### Combine cut off predictions and OOA predictions
+                marker_kinematics_with_prediction = CombinePredictionAndCutOff(marker_kinematics_with_prediction)
+            
             #### Get only values with succeding measurement made within 72 hours 
             marker_kinematics_with_prediction = SuccededWithinTime(marker_kinematics_with_prediction,time_within)
             
             #### Get only non-zero values
             marker_kinematics_with_prediction = marker_kinematics_with_prediction[marker_kinematics_with_prediction.displacement != 0]
             
-            #### Cut off parameter threshold
-            marker_kinematics_with_prediction = marker_kinematics_with_prediction[marker_kinematics_with_prediction[parameter_name] >= parameter_threshold]
-            
+            if mode == 'define':
+                #### Cut off values based on parameter
+                marker_kinematics_with_prediction = marker_kinematics_with_prediction[marker_kinematics_with_prediction[parameter_name] >= parameter_threshold]            
+                
             #### Print current thresholds
             print "OOA Threshold: {}".format(round(confidence_level,4))
             print "{} Threshold: {}".format(parameter_name.title(),round(parameter_threshold,4))
@@ -805,6 +1046,11 @@ def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,
         #### Plot the false positive rate vs true positive rate
         ax.plot(false_positive_rates,true_positive_rates)
         
+        #### Get AUC
+        auc = np.trapz(true_positive_rates,x = false_positive_rates)
+        
+        #### Append auc score to container
+        auc_scores.append(auc)
     
     #### Set axis labels
     ax.set_xlabel('False Positive Rates',fontsize = 14)
@@ -820,8 +1066,51 @@ def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,
     #### Set aspect as equal
     ax.set_aspect('equal')
     
+    #### Set save path
+    save_path = "{}\ROC\\OOA\\With CutOff\\ROC".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')
+        
     #### Save fig
-    plt.savefig('ROC OOA Threshold Min {} Max {} N {} With {} Min {} Max {} N {}.png'.format(round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range),parameter_name.title(),round(min(parameter_threshold_range),4),round(max(parameter_threshold_range),4),len(parameter_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    plt.savefig('{}\ROC OOA Threshold Min {} Max {} N {} With {} Min {} Max {} N {} Mode {}.png'.format(save_path,round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range),parameter_name.title(),round(min(parameter_threshold_range),4),round(max(parameter_threshold_range),4),len(parameter_threshold_range),mode),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    #### Plot AUC vs cut off threshold curve
+    
+    #### Initialize figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot grid
+    ax.grid()
+    
+    #### Plot results
+    ax.scatter(parameter_threshold_range,auc_scores,c = parameter_threshold_range, cmap = 'plasma',s = 12,zorder = 3)
+    
+    #### Indicate maximum AUC
+    auc_max = round(max(auc_scores),4)
+    
+    #### Print max AUC
+    auc_max_text = 'Max AUC = {}'.format(auc_max)
+    ax.add_artist(AnchoredText(auc_max_text,prop=dict(size=10), frameon=False,loc = 4))
+    
+    #### Set axis labels
+    ax.set_xlabel('{}'.format(parameter_name.title()),fontsize = 14)
+    ax.set_ylabel('Area under the ROC',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('AUC for OOA vs {} Cut Off'.format(parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(6)
+    fig.set_figwidth(8)
+
+    #### Set save path
+    save_path = "{}\ROC\\OOA\\With CutOff\\AUC".format(data_path)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')
+
+    #### Save fig
+    plt.savefig('{}\AUC ROC OOA Threshold Min {} Max {} N {} With {} Min {} Max {} N {} Mode {}.png'.format(save_path,round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range),parameter_name.title(),round(min(parameter_threshold_range),4),round(max(parameter_threshold_range),4),len(parameter_threshold_range),mode),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
 
 def GetPerSiteMarkerDataCount(marker_kinematics,time_within):
     """
@@ -1151,19 +1440,867 @@ def MarkerDataCountPlots(marker_data_count):
     ### Close fig
     plt.close()
 
-
-
-
-
-
-
-
-
-
-
+def PlotROCArbitraryParameterPerSite(marker_kinematics,time_within,parameter_name,site):
+    """
+    Plots the ROC of a given parameter in the marker_kinematics data for a secified site
 
     
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() 
+        Marker kinematics data frame
+    time_within: float
+        Time in hours in which the next measurement is made
+    parameter_name: string
+        name of the parameter whose ROC is to be plotted
+    site: string
+        site_code of the site to be analyzed
+        
+        
+    Returns
+    -------------------
+    None: Plots ROC and saves to ROC folder
+        
+    """
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+    
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+        
+    #### Get only the values for the specified site
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.site_id == site]
+    
+    try:
+        #### Get false positive rates and true positive rates and corresponding thresholds
+        fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+    except:
+        #### Return nan if insufficient data
+        fpr = np.array([np.nan])
+        tpr = np.array([np.nan])
+        thresholds = np.array([np.nan])
+    
+    #### Record results to data frame
+    roc_results = pd.DataFrame({'tpr':tpr,'fpr':fpr,'threshold':thresholds})
+    
+    #### Compute for Youden Index
+    roc_results['yi'] = tpr - fpr
 
+    #### Get maximum Youden Index
+    max_YI = max(roc_results.yi)
+    
+    try:
+        #### Get threshold with maximum YI
+        optimized_threshold = roc_results[roc_results.yi == max_YI].threshold.values[-1]
+        
+        #### Get fpr and tpr of maximum YI
+        optimized_fpr = roc_results[roc_results.threshold == optimized_threshold].fpr.values[0]
+        optimized_tpr = roc_results[roc_results.threshold == optimized_threshold].tpr.values[0]
+    except:
+        #### Return nan if not enough data
+        optimized_fpr = np.nan
+        optimized_tpr = np.nan
+        optimized_threshold = np.nan
+    
+    try:
+        #### Get AUC ROC value
+        auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+    except:
+        #### Return nan if not enough data
+        auc = np.nan
+
+    #### Plot results
+    
+    #### Initialize figure, open subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+        
+    #### Plot random guess line
+    random_guess_line, = ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    
+    #### Plot fpr vs tpr
+    roc_line, = ax.plot(fpr,tpr,label = '{} Threshold'.format(parameter_name.title()))
+    
+    #### Plot Max YI line
+    ax.plot(np.ones(1000)*optimized_fpr,np.linspace(optimized_fpr,optimized_tpr,1000),'--',color = tableau20[16])
+    max_yi_line, = ax.plot([optimized_fpr],[optimized_tpr],'o--',color = tableau20[16],label = 'Max YI',markersize = 4)
+    
+    #### Print AUC ROC result
+    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
+    
+    #### Plot the legend
+    plt.legend(handles = [roc_line,random_guess_line,max_yi_line],loc = 'upper right')
+    
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('ROC Plot for {} Threshold'.format(parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+    
+    #### Set save path
+    save_path = "{}\\ROC\\Site\\{}\\Arbitrary Parameter".format(data_path,site)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+        
+    #### Save fig
+    plt.savefig('{}\\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    return marker_kinematics_with_condition
+ 
+def PlotROCSplinePredictionPerSite(marker_kinematics,time_within,confidence_threshold_range,site_code):
+    """
+    Plots the ROC using the given confidence threshold range with the kinematics data frame and specified time interval
+
+    
+    Parameters
+    ------------------
+
+
+        
+    Returns
+    -------------------
+
+        
+    """
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only data from specified site
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.site_id == site_code.upper()]
+    
+#    #### Get spline computations
+#    marker_kinematics_with_condition = MarkerSplineComputations(marker_kinematics_with_condition)
+    
+    #### Initialize the results container
+    true_positive_rates = []
+    false_positive_rates = []
+    
+    #### Iterate all the velocity threshold range
+    for confidence_level in confidence_threshold_range:
+        
+        #### Get marker kinematics with prediction data frame
+        marker_kinematics_with_prediction = ComputeSplinePredictionRates(marker_kinematics_with_condition,confidence_level)
+        
+        #### Get only values with succeding measurement made within 72 hours 
+        marker_kinematics_with_prediction = SuccededWithinTime(marker_kinematics_with_prediction,time_within)
+        
+        #### Get only non-zero values
+        marker_kinematics_with_prediction = marker_kinematics_with_prediction[marker_kinematics_with_prediction.displacement != 0]
+        
+        #### Print current threshold
+        print "Threshold: {}".format(round(confidence_level,4))
+        
+        #### Get prediction rates
+        prediction_rates = ComputePredictionRates(marker_kinematics_with_prediction)
+        
+        #### Store result to container
+        true_positive_rates.append(prediction_rates['tpr'])
+        false_positive_rates.append(prediction_rates['fpr'])
+    
+    #### Plot results
+    
+    #### Initialize figure, open the subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot the false positive rate vs true positive rate
+    ax.plot(false_positive_rates,true_positive_rates,label = 'OOA Filter')
+    
+    #### Plot the guess line
+    ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    
+    #### Plot the legend
+    plt.legend(loc = 'upper right')
+    
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('ROC Plot for OOA Filter',fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+    
+    #### Set save path
+    save_path = "{}\\ROC\\Site\\{}".format(data_path,site_code.upper())
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\ROC OOA Threshold Min {} Max {} N {}.png'.format(save_path,round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotHistograms(marker_kinematics, parameter_name,time_within,bins = 750):
+    """
+    Plots the histogram plots of the specified parameter for cases (1) ALL, (2) Non zero displacement, (3) Non zero displacement with precedance of acceleration within prescribed time interval
+
+    
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame()
+        Dataframe containing the computed marker kinematics
+    parameter_name: string
+        Name of the parameter whose histogram is to be plot
+    time_within: float
+        Time in hours of the prescribed time_interval from the definition
+
+        
+    Returns
+    -------------------
+    Plots all the histogram for three cases
+
+        
+    """
+    
+    ############################################
+    ##### Plot case 1: ALL unfiltered data #####
+    ############################################
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = marker_kinematics[marker_kinematics.time_interval <= 720][parameter_name].hist(bins = bins,zorder = 3)
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for ALL Marker Data',fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\{}".format(data_path,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} all marker data.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    #######################################################
+    ##### Plot case 2: ALL Non zero displacement data #####
+    #######################################################
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = marker_kinematics[np.logical_and(marker_kinematics.time_interval <= 720,marker_kinematics.displacement != 0)][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[8])
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for Non-Zero Displacement Marker Data',fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\{}".format(data_path,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    ##############################################################################
+    ##### Plot case 3: ALL Non zero displacement data preceding acceleration #####
+    ##############################################################################
+    
+    #### Get data frame preceding acceleration
+    preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics,time_within)
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = preceded_acceleration[np.logical_and(preceded_acceleration.time_interval <= 720,preceded_acceleration.displacement != 0)][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[4])
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for Non Zero Marker Data Preceding Acceleration Within {} Hours'.format(time_within),fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\{}".format(data_path,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data prec acc within {}.png'.format(save_path,parameter_name,bins,time_within),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotROCArbitraryParameterPerTimeBin(marker_kinematics,time_within,parameter_name,time_start,time_end):
+    """
+    Plots the ROC of a given parameter in the marker_kinematics data restricted in a specified time bin
+
+    
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() 
+        Marker kinematics data frame
+    time_within: float
+        Time in hours in which the next measurement is made
+    parameter_name: string
+        name of the parameter whose ROC is to be plotted
+    time_start: float
+        Time in hours for the start of the bin
+    time_end: float
+        Time in hours for the end of the bin
+        
+        
+    Returns
+    -------------------
+    None: Plots ROC and saves to ROC folder
+        
+    """
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+    
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
+    #### Get only the values for the specified time bin
+    marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_end,marker_kinematics_with_condition.time_interval >= time_start)]
+    
+    #### Get false positive rates and true positive rates and corresponding thresholds
+    fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+    
+    #### Record results to data frame
+    roc_results = pd.DataFrame({'tpr':tpr,'fpr':fpr,'threshold':thresholds})
+    
+    #### Compute for Youden Index
+    roc_results['yi'] = tpr - fpr
+        
+    #### Get maximum Youden Index
+    max_YI = max(roc_results.yi)
+    
+    #### Get threshold with maximum YI
+    optimized_threshold = roc_results[roc_results.yi == max_YI].threshold.values[-1]
+    
+    #### Get fpr and tpr of maximum YI
+    optimized_fpr = roc_results[roc_results.threshold == optimized_threshold].fpr.values[0]
+    optimized_tpr = roc_results[roc_results.threshold == optimized_threshold].tpr.values[0]
+    
+    #### Get AUC ROC value
+    auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+
+    #### Plot results
+    
+    #### Initialize figure, open subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+        
+    #### Plot random guess line
+    random_guess_line, = ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    
+    #### Plot fpr vs tpr
+    roc_line, = ax.plot(fpr,tpr,label = '{} Threshold'.format(parameter_name.title()))
+    
+    #### Plot Max YI line
+    ax.plot(np.ones(1000)*optimized_fpr,np.linspace(optimized_fpr,optimized_tpr,1000),'--',color = tableau20[16])
+    max_yi_line, = ax.plot([optimized_fpr],[optimized_tpr],'o--',color = tableau20[16],label = 'Max YI',markersize = 4)
+    
+    #### Print AUC ROC result
+    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
+    
+    #### Plot the legend
+    plt.legend(handles = [roc_line,random_guess_line,max_yi_line],loc = 'upper right')
+    
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('ROC Plot for {} Threshold'.format(parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+  
+    #### Set save path
+    save_path = "{}\ROC\\Time Bins\\{} to {}".format(data_path,time_start,time_end)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+    
+    #### Save fig
+    plt.savefig('{}\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotROCArbitraryParameterPerTimeBinAndSite(marker_kinematics,time_within,parameter_name,time_start,time_end,site):
+    """
+    Plots the ROC of a given parameter in the marker_kinematics data restricted in a specified time bin and site
+
+    
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() 
+        Marker kinematics data frame
+    time_within: float
+        Time in hours in which the next measurement is made
+    parameter_name: string
+        name of the parameter whose ROC is to be plotted
+    time_start: float
+        Time in hours for the start of the bin
+    time_end: float
+        Time in hours for the end of the bin
+    site: string
+        Name of specified site
+        
+    Returns
+    -------------------
+    None: Plots ROC and saves to ROC folder
+        
+    """
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+    
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
+    #### Get only the values for the specified time bin
+    marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_end,marker_kinematics_with_condition.time_interval >= time_start)]
+    
+    #### Get only the values for the specified site
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.site_id == site]
+    
+    try:
+        #### Get false positive rates and true positive rates and corresponding thresholds
+        fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+    except:
+        #### Return nan if insufficient data
+        fpr = np.array([np.nan])
+        tpr = np.array([np.nan])
+        thresholds = np.array([np.nan])
+    
+    #### Record results to data frame
+    roc_results = pd.DataFrame({'tpr':tpr,'fpr':fpr,'threshold':thresholds})
+    
+    #### Compute for Youden Index
+    roc_results['yi'] = tpr - fpr
+
+    #### Get maximum Youden Index
+    max_YI = max(roc_results.yi)
+    
+    try:
+        #### Get threshold with maximum YI
+        optimized_threshold = roc_results[roc_results.yi == max_YI].threshold.values[-1]
+        
+        #### Get fpr and tpr of maximum YI
+        optimized_fpr = roc_results[roc_results.threshold == optimized_threshold].fpr.values[0]
+        optimized_tpr = roc_results[roc_results.threshold == optimized_threshold].tpr.values[0]
+    except:
+        #### Return nan if not enough data
+        optimized_fpr = np.nan
+        optimized_tpr = np.nan
+        optimized_threshold = np.nan
+    
+    try:
+        #### Get AUC ROC value
+        auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+    except:
+        #### Return nan if not enough data
+        auc = np.nan
+
+    #### Plot results
+    
+    #### Initialize figure, open subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+        
+    #### Plot random guess line
+    random_guess_line, = ax.plot(np.arange(0,1,0.0001),np.arange(0,1,0.0001),'--',color = tableau20[6],label = 'Random Guess')
+    
+    #### Plot fpr vs tpr
+    roc_line, = ax.plot(fpr,tpr,label = '{} Threshold'.format(parameter_name.title()))
+    
+    #### Plot Max YI line
+    ax.plot(np.ones(1000)*optimized_fpr,np.linspace(optimized_fpr,optimized_tpr,1000),'--',color = tableau20[16])
+    max_yi_line, = ax.plot([optimized_fpr],[optimized_tpr],'o--',color = tableau20[16],label = 'Max YI',markersize = 4)
+    
+    #### Print AUC ROC result
+    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
+    
+    #### Plot the legend
+    plt.legend(handles = [roc_line,random_guess_line,max_yi_line],loc = 'upper right')
+    
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('ROC Plot for {} Threshold'.format(parameter_name.title()),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+  
+    #### Set save path
+    save_path = "{}\ROC\\Site\\{}\\Time Bins\\{} to {}".format(data_path,site,time_start,time_end)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+    
+    #### Save fig
+    plt.savefig('{}\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotHistogramsPerSite(marker_kinematics, parameter_name,time_within,site,bins = 750):
+    """
+    Plots the histogram plots of the specified parameter for cases (1) ALL, (2) Non zero displacement, (3) Non zero displacement with precedance of acceleration within prescribed time interval for a chosen site
+
+    
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame()
+        Dataframe containing the computed marker kinematics
+    parameter_name: string
+        Name of the parameter whose histogram is to be plot
+    time_within: float
+        Time in hours of the prescribed time_interval from the definition
+    site: string
+        Site code of the chosen site
+        
+    Returns
+    -------------------
+    Plots all the histogram for three cases
+
+        
+    """
+    
+    #### Select only data from chosen site
+    marker_kinematics = marker_kinematics[marker_kinematics.site_id == site]
+    
+    ############################################
+    ##### Plot case 1: ALL unfiltered data #####
+    ############################################
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = marker_kinematics[marker_kinematics.time_interval <= 720][parameter_name].hist(bins = bins,zorder = 3)
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.5)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for ALL Marker Data',fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\Site\\{}\\{}".format(data_path,site,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} all marker data.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    #######################################################
+    ##### Plot case 2: ALL Non zero displacement data #####
+    #######################################################
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = marker_kinematics[np.logical_and(marker_kinematics.time_interval <= 720,marker_kinematics.displacement != 0)][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[8])
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for Non-Zero Displacement Marker Data',fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\Site\\{}\\{}".format(data_path,site,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    ##############################################################################
+    ##### Plot case 3: ALL Non zero displacement data preceding acceleration #####
+    ##############################################################################
+    
+    #### Get data frame preceding acceleration
+    preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics,time_within)
+    
+    #### Plot results from data frame filtering data with time interval > 30 days
+    fig = plt.figure()
+    ax = preceded_acceleration[np.logical_and(preceded_acceleration.time_interval <= 720,preceded_acceleration.displacement != 0)][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[4])
+    
+    #### Plot auxillary lines and labels for time interval
+    if parameter_name == 'time_interval':
+        
+        #### Transform axes on xaxis
+        trans = ax.get_xaxis_transform()
+        
+        #### 7 day line
+        ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 day line
+        ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 3 day line
+        ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 2 day line
+        ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 1 day line
+        ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        
+        #### 4 hour line
+        ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+    
+    #### Set axis labels
+    if parameter_name == 'time_interval':
+        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set figure label
+    if parameter_name == 'time_interval':
+        fig.suptitle('Histogram Plot for Time Interval for Non Zero Marker Data Preceding Acceleration Within {} Hours'.format(time_within),fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\Site\\{}\\{}".format(data_path,site,parameter_name)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data prec acc within {}.png'.format(save_path,parameter_name,bins,time_within),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
 
 
                                                
