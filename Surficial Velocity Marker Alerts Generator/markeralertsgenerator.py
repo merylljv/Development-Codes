@@ -12,12 +12,14 @@ import sys
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
 from scipy import stats
+import matplotlib.dates as md
 from datetime import datetime, timedelta
 from scipy.interpolate import UnivariateSpline
 from scipy.signal import gaussian
 from scipy.ndimage import filters
 from sqlalchemy import create_engine
 from sklearn import metrics
+from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
 ### Include Analysis folder of updews-pycodes (HARD CODED!!)
 
@@ -2089,13 +2091,22 @@ def PlotROCArbitraryParameterPerTimeBin(marker_kinematics,time_within,parameter_
     #### Set aspect as equal
     ax.set_aspect('equal')
   
-    #### Set save path
+    #### Set save path 1
     save_path = "{}\ROC\\Time Bins\\{} to {}".format(data_path,time_start,time_end)
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
     
     #### Save fig
     plt.savefig('{}\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    #### Set save path 2
+    save_path = "{}\ROC\\Time Bins\\Per Parameter\\{}".format(data_path,parameter_name)
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')
+        
+    #### Save fig
+    plt.savefig('{}\{} Threshold Time Bin {} to {}.png'.format(save_path,parameter_name,time_start,time_end),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
 
 def PlotROCArbitraryParameterPerTimeBinAndSite(marker_kinematics,time_within,parameter_name,time_start,time_end,site):
     """
@@ -2501,13 +2512,323 @@ def PlotOptimalThresholdResults(time_bins,thresholds,parameter_name):
     #### Save fig
     plt.savefig('{}\\{} threshold vs time bins'.format(save_path,parameter_name),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
+def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thresholds,time_bins,bins = 1000):
+    """
+    Plots the histogram of specified parameter and compares it with the optimal cut off threshold
     
+    Parameters
+    ------------------
+    marker_kinematics - pd.DataFrame()
+        Data frame containing the kimenatic data of markers
+    parameter_name - string
+        name of the parameter
+    time_within - float
+        time in hours of the defined time interval between measurements
+    thresholds - list
+        list containing the threshold values
+    time_bins - list
+        list containing the time bins
+        
+    Returns
+    -------------------
+    Plots the optimal threshold vs time bins
+    """
+    if parameter_name == 'sp_velocity':
+        #### Get data frame preceding acceleration filtered values
+        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 1],time_within)
+        
+        #### Get data frame preceding deceleration filtered values
+        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 1],time_within)
+        
+    elif parameter_name == 'sp_acceleration':
+        #### Get data frame preceding acceleration filtered values
+        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 0.002],time_within)
+        
+        #### Get data frame preceding deceleration filtered values
+        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 0.002],time_within)
+        
+    else:
+        #### Get data frame preceding acceleration filtered values
+        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 100],time_within)
+        
+        #### Get data frame preceding deceleration filtered values
+        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 100],time_within)
+
     
+    #### Initialize xlabels and fig title
+    if parameter_name == 'sp_velocity':
+        label = 'Velocity (cm/hr)'
+        sup_title = 'Spline Velocity'
+    elif parameter_name == 'sp_acceleration':
+        label = r'Acceleration (cm/hr$^2$)'
+        sup_title = 'Spline Acceleration'
     
+    #### Plot threshold lines and annotations
+    for i,(time_bin,threshold) in enumerate(zip(time_bins,thresholds)):
+        
+        #### Initialize figure and axes
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        
+        #### Plot histogram of data within time bin
+        preceded_deceleration[np.logical_and(preceded_deceleration.time_interval >= time_bin[0],preceded_deceleration.time_interval <= time_bin[1])][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[6],ax = ax,label = 'Deceleration')
+        preceded_acceleration[np.logical_and(preceded_acceleration.time_interval >= time_bin[0],preceded_acceleration.time_interval <= time_bin[1])][parameter_name].hist(bins = bins,zorder = 4,color = tableau20[4],ax = ax,alpha = 0.75,label = 'Acceleration')
+        
+        #### Plotting threshold line
+        ax.axvline(threshold,ls = '--',color = tableau20[16],zorder = 5,alpha = 0.75,label = 'Threshold')
+        
+        #### Print time bin
+        ax.text(0.975,0.025,'Time Bin {} to {}'.format(time_bin[0],time_bin[1]),transform = fig.transFigure,ha = 'right',fontsize = 10)
+        
+        #### Set axis labels
+        ax.set_xlabel(label,fontsize = 14)
+        ax.set_ylabel('Frequency',fontsize = 14)
+        
+        #### Set fig sup title
+        fig.suptitle('Histogram Plot for {}'.format(sup_title),fontsize = 15)
+        
+        #### Draw legend
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles[::-1],labels[::-1])
+        
+        #### Set fig size
+        fig.set_figheight(6.5)
+        fig.set_figwidth(13)
+        
+        #### Set save path
+        save_path = "{}\\Histograms\\Thresholds\\{}".format(data_path,parameter_name)
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')   
+            
+        #### Save fig
+        plt.savefig('{}\\{} threshold histogram time bin {} to {}'.format(save_path,parameter_name,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_threshold,sp_acceleration_threshold,num_pts = 10):
+    '''
+    Plots the spline computation for every marker in the specified time bin and compares it with the computed threshold
     
+    Parameters
+    ---------------------------
+    marker_kinematics - pd.DataFrame()
+        Data frame containing the marker data with kinematic data
+    time_within - float
+        time in hours of the defined time interval between measurements
+    time_bin - array shape(2)
+        Specified time bin
+    sp_velocity_threshold - float
+        Spline velocity in cm/hour of the specified time bin
+    sp_acceleration_threshold - float
+        Spline acceleration threshold in cm/hour^2 of the specified time bin
     
+    Returns
+    ---------------------------
+    None
     
+    '''
+    #### Get marker_condition dataframe
     
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Restrict data frame to specified condition
+    
+    #### Non zero displacement
+    marker_data_to_plot = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement > 0]
+    
+    #### Displacement filter
+    marker_data_to_plot = marker_data_to_plot[marker_data_to_plot.displacement <= 100]
+    
+    #### Within time bin
+    marker_data_to_plot = marker_data_to_plot[np.logical_and(marker_data_to_plot.time_interval >= time_bin[0],marker_data_to_plot.time_interval <= time_bin[1])]
+    
+    for timestamp, site_id, crack_id in marker_data_to_plot[['timestamp','site_id','crack_id']].values:
+        
+        #### Get the site and marker data
+        marker_data = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.site_id == site_id,marker_kinematics_with_condition.crack_id == crack_id)]
+        
+        #### Get the next data
+        try:
+            next_data = marker_data.ix[marker_data[marker_data.timestamp == timestamp].index + 1]
+        except:
+            next_data = None
+        
+        #### Get the last 10 data
+        marker_data = marker_data[marker_data.timestamp <= timestamp].tail(num_pts)
+        
+        #### Get time elapsed based on time_interval
+        marker_data['time'] = marker_data['time_interval'].cumsum()
+        
+        print marker_data
+        
+        #### Get time and displacement values for spline computation
+        time = marker_data.time.values
+        meas = marker_data.meas.values
+        
+        #### Get interpolation time and timestamps
+        time_int = np.linspace(time[0],time[-1],1000)
+        datetime_int = pd.to_datetime(np.linspace(marker_data.iloc[0].timestamp.value,marker_data.iloc[-1].timestamp.value,1000))
+        
+        #### Commence interpolation
+        try:
+            #### Take the gaussian average of data points and its variance
+            _,var = moving_average(meas)
+            sp = UnivariateSpline(time,meas,w=1/np.sqrt(var))
+            
+            #### Spline interpolation values    
+            disp_int = sp(time_int)
+            vel_int = sp.derivative(n=1)(time_int)
+            acc_int = sp.derivative(n=2)(time_int)
+
+        except:
+            print "Interpolation error {} {}".format(marker_data.site_id.values[0],marker_data.crack_id.values[0])
+            disp_int = np.zeros(len(time_int))
+            vel_int = np.zeros(len(time_int))
+            acc_int = np.zeros(len(time_int))
+            
+        #### Commence plotting
+        fig = plt.figure()
+        disp_ax = plt.subplot2grid((2,3),(0,0),2,2)
+        vel_ax = plt.subplot2grid((2,3),(0,2))
+        acc_ax = plt.subplot2grid((2,3),(1,2),sharex = vel_ax)
+        conf_vel_ax = inset_axes(vel_ax,width = "25%",height = "25%",loc = 4)
+        conf_acc_ax = inset_axes(acc_ax,width = "25%",height = "25%",loc = 4)
+        
+        #### Display grid
+        disp_ax.grid()
+        
+        #### Plot meas interpolation
+        interpolation_line, = disp_ax.plot(datetime_int,disp_int,color = tableau20[0],label = 'Interpolation')
+        
+        #### Plot meas data
+        disp_ax.plot(np.append(marker_data.timestamp.values,next_data.timestamp),np.append(meas,next_data.meas),'--',color = tableau20[1],alpha = 0.5)
+        data_line, = disp_ax.plot(np.append(marker_data.timestamp.values,next_data.timestamp),np.append(meas,next_data.meas),'.',color = tableau20[12],label = 'Data',markersize = 8)
+        
+        #### Plot velocity interpolation
+        vel_ax.plot(time_int,vel_int,color = tableau20[4])
+        
+        #### Plot velocity threshold
+        vel_ax.axhline(sp_velocity_threshold,ls = '--',color = tableau20[16])
+        
+        #### Plot acceleration interpolation
+        acc_ax.plot(time_int,acc_int,color = tableau20[6])
+        acc_ax.axhline(sp_acceleration_threshold,ls = '--',color = tableau20[16])
+        
+        #### Compute for the classification based on threshold and conditions
+
+        vel_class = marker_data.iloc[-1].condition + (vel_int[-1] >= sp_velocity_threshold)*1
+        acc_class = marker_data.iloc[-1].condition + (acc_int[-1] >= sp_acceleration_threshold)*1
+        
+        #### Plot confusion matrix
+        for i,conf_ax in enumerate([conf_vel_ax,conf_acc_ax]):
+            conf_ax.axvline(0.5,color = 'black',lw = 0.5)
+            conf_ax.axhline(0.5,color = 'black',lw = 0.5)
+            
+            #### Get classification for current class
+            if i == 0:
+                classification = vel_class
+            else:
+                classification = acc_class
+            
+            #### True positives
+            if classification == 2:
+                conf_ax.axvspan(0,0.5,0.5,1,color = tableau20[4],alpha = 0.5)
+                
+            #### False positive
+            elif classification == 0:
+                conf_ax.axvspan(0,0.5,0,0.5,color = tableau20[6],alpha = 0.5)
+            
+            #### False negative
+            elif classification == 1:
+                conf_ax.axvspan(0.5,1,0.5,1,color = tableau20[6],alpha = 0.5)
+                
+            #### True negative
+            elif classification == -1:
+                conf_ax.axvspan(0.5,1,0,0.5,color = tableau20[4],alpha = 0.5)
+        
+            #### Set xlim and ylim
+            conf_ax.set_xlim([0,1])
+            conf_ax.set_ylim([0,1])
+            
+            #### Print confusion matrix labels
+            conf_ax.text(0.25,0.75,'TP',transform = conf_ax.transAxes,fontsize = 8,ha = 'center',va = 'center')
+            conf_ax.text(0.75,0.75,'FN',transform = conf_ax.transAxes,fontsize = 8,ha = 'center',va = 'center')
+            conf_ax.text(0.75,0.25,'TN',transform = conf_ax.transAxes,fontsize = 8,ha = 'center',va = 'center')
+            conf_ax.text(0.25,0.25,'FP',transform = conf_ax.transAxes,fontsize = 8,ha = 'center',va = 'center')
+            
+            #### Remove ticks
+            conf_ax.tick_params('both',which = 'both',bottom = 'off',left = 'off',labelbottom = 'off',labelleft = 'off')
+            
+            #### Set equal aspect ratio
+            conf_ax.set_aspect('equal')
+            
+            #### Set axes transparency
+            conf_ax.patch.set_alpha(0.5)
+        
+        #### Print time bin
+        acc_ax.text(0.975,0.025,'Time Bin {} to {}'.format(time_bin[0],time_bin[1]),transform = fig.transFigure,ha = 'right',fontsize = 10)
+        
+        #### Set tick parameters
+        vel_ax.tick_params(which = 'both',left = 'off',right = 'on',labelright = 'on',bottom = 'off',labelbottom = 'off',labelleft = 'off')
+        acc_ax.tick_params(which = 'both',left = 'off',right = 'on',labelright = 'on',labelleft = 'off')
+        disp_ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+        
+        #### Set legend
+        disp_ax.legend(handles = [data_line,interpolation_line],loc = 1)
+        
+        #### Set axis labels
+        disp_ax.set_ylabel('Meas (cm)',fontsize = 14)
+        disp_ax.set_xlabel('Datetime',fontsize = 14)
+        vel_ax.set_ylabel('Velocity (cm/hr)',fontsize = 14)
+        acc_ax.set_ylabel(r'Acceleration (cm/hr$^2$)',fontsize = 14)
+        acc_ax.set_xlabel('Time (hr)',fontsize = 14)
+        
+        #### Set axis label position
+        vel_ax.yaxis.set_label_position('right')
+        acc_ax.yaxis.set_label_position('right')
+        
+        #### Set fig sup title
+        fig.suptitle('{} Site {} Marker {}'.format(marker_data.iloc[-1].timestamp.strftime("%b %d, %Y"),marker_data.iloc[-1].site_id.upper(),marker_data.iloc[-1].crack_id.title()),fontsize = 15)
+        
+        #### Set fig size
+        fig.set_figwidth(15)
+        fig.set_figheight(10)
+        
+        #### Set fig spacing
+        fig.subplots_adjust(top = 0.92,bottom = 0.11,left = 0.08,right = 0.92,hspace = 0.05, wspace = 0.05)
+        
+        #### Set savefig directory
+        save_path = "{}\\Interpolations\\{} to {}".format(data_path,time_bin[0],time_bin[1])
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')   
+            
+        #### Save fig
+        plt.savefig('{}\\{} {} {}'.format(save_path,marker_data.iloc[-1].timestamp.strftime("%Y-%m-%d_%H-%M"),marker_data.iloc[-1].site_id.upper(),marker_data.iloc[-1].crack_id.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        #### Close fig
+        plt.close()
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     
                                                
