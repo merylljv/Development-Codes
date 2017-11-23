@@ -60,7 +60,7 @@ def students_t(confidence_level,n):
 
 def nonrepeat_colors(ax,NUM_COLORS,color='gist_rainbow'):
     cm = plt.get_cmap(color)
-    ax.set_color_cycle([cm(1.*(NUM_COLORS-i-1)/NUM_COLORS) for i in range(NUM_COLORS)[::-1]])
+    ax.set_color_cycle([cm(1.*(NUM_COLORS-i-1)/NUM_COLORS) for i in np.array(range(NUM_COLORS))[::-1]])
     return ax
 
 
@@ -755,7 +755,7 @@ def PlotROCSplinePrediction(marker_kinematics,time_within,confidence_threshold_r
     #### Save fig
     plt.savefig('{}\\ROC OOA Threshold Min {} Max {} N {}.png'.format(save_path,round(min(confidence_threshold_range),4),round(max(confidence_threshold_range),4),len(confidence_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
-def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
+def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name,time_bin = None,cut_off_parameter_name = None,cut_off_value = None):
     """
     Plots the ROC of a given parameter in the marker_kinematics data
 
@@ -790,6 +790,14 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     
     #### Get only displacement values < 100 cm
     marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
+    #### Get only specified time bin
+    if time_bin:
+        marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval >= time_bin[0],marker_kinematics_with_condition.time_interval <= time_bin[1])]
+    
+    #### Cut off filter
+    if cut_off_parameter_name or cut_off_value:
+        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition[cut_off_parameter_name] >= cut_off_value]
     
     #### Get false positive rates and true positive rates and corresponding thresholds
     fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
@@ -832,6 +840,10 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     #### Print AUC ROC result
     ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
     
+    if time_bin or cut_off_value:
+        #### Print number of data points and time bin
+        ax.text(0.975,0.025,'Time Bin {} to {}\nPos {} Neg {}\nCut Off {}'.format(time_bin[0],time_bin[1],len(marker_kinematics_with_condition[marker_kinematics_with_condition.condition == 1]),len(marker_kinematics_with_condition[marker_kinematics_with_condition.condition == -1]),cut_off_value),transform = fig.transFigure,ha = 'right',fontsize = 10)
+    
     #### Plot the legend
     plt.legend(handles = [roc_line,random_guess_line,max_yi_line],loc = 'upper right')
     
@@ -850,14 +862,20 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name):
     ax.set_aspect('equal')
   
     #### Set save path
-    save_path = "{}\ROC\\Arbitrary Parameter".format(data_path)
+    if not (time_bin or cut_off_parameter_name):
+        save_path = "{}\ROC\\Arbitrary Parameter".format(data_path)
+    elif time_bin and cut_off_parameter_name:
+        save_path = "{}\ROC\\Time Bins\\Cut Off\\{}\\{} to {}\\Optimal".format(data_path,cut_off_parameter_name,time_bin[0],time_bin[1])
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
     
     #### Save fig
     plt.savefig('{}\{} Threshold.png'.format(save_path,parameter_name.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    if time_bin or cut_off_parameter_name:
+        return optimized_threshold
 
-def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,parameter_name,cut_off_parameter_name,cut_off_threshold_range):
+def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,parameter_name,cut_off_parameter_name,cut_off_threshold_range,time_bin = None):
     """
     Plots the ROC of a given parameter in the marker_kinematics data along with another parameter along a cut off threshold
 
@@ -910,13 +928,17 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
     for cut_off_threshold in cut_off_threshold_range:
         
         #### Cut off parameter threshold
-        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition[cut_off_parameter_name] >= cut_off_threshold]
+        cur_data = marker_kinematics_with_condition[marker_kinematics_with_condition[cut_off_parameter_name] >= cut_off_threshold]
+        
+        if time_bin:
+            #### Cut off time bin
+            cur_data = cur_data[np.logical_and(cur_data.time_interval >= time_bin[0],cur_data.time_interval <= time_bin[1])]
         
         #### Get false positive rates and true positive rates and corresponding thresholds
-        fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+        fpr, tpr, thresholds = metrics.roc_curve(cur_data.condition.values,cur_data[parameter_name].values)
         
         #### Get AUC
-        auc = metrics.roc_auc_score(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
+        auc = metrics.roc_auc_score(cur_data.condition.values,cur_data[parameter_name].values)
         
         #### Append to results container
         auc_scores.append(auc)
@@ -925,7 +947,18 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
         
         #### Plot fpr vs tpr
         ax.plot(fpr,tpr)
+    
+    #### Record AUC results to data frame
+    auc_results = pd.DataFrame({'cut_off':cut_off_threshold_range,'auc':auc_scores})
+    
+    #### Obtain optimal auc and cut off value
+    optimal_auc = max(auc_results.auc.values)
+    optimal_cut_off = auc_results[auc_results.auc == optimal_auc].cut_off.values[0]
                 
+    if time_bin:
+        #### Print time bin
+        ax.text(0.975,0.025,'Time Bin {} to {}'.format(time_bin[0],time_bin[1]),transform = fig.transFigure,ha = 'right',fontsize = 10)    
+    
     #### Set axis labels
     ax.set_xlabel('False Positive Rates',fontsize = 14)
     ax.set_ylabel('True Positive Rates',fontsize = 14)
@@ -941,14 +974,24 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
     ax.set_aspect('equal')
     
     #### Set save path
-    save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\ROC".format(data_path)
+    if time_bin:
+        save_path = "{}\ROC\\Time Bins\\Cut Off\\{}\\{} to {}\\ROC".format(data_path,cut_off_parameter_name,time_bin[0],time_bin[1])
+    else:
+        save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\ROC".format(data_path)
+    
+    #### Create save path if not exists
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
     
     #### Save fig
     plt.savefig('{}\{} Threshold With {} Min {} Max {} N {}.png'.format(save_path,parameter_name.title(),cut_off_parameter_name.title(),round(min(cut_off_threshold_range),4),round(max(cut_off_threshold_range),4),len(cut_off_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
-    #### Plot AUC vs cut off threshold curve
+    #### Close fig
+    plt.close()
+    
+    ############################################
+    #### Plot AUC vs cut off threshold curve ###
+    ############################################
     
     #### Initialize figure
     fig = plt.figure()
@@ -960,11 +1003,12 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
     #### Plot results
     ax.scatter(cut_off_threshold_range,auc_scores,c = cut_off_threshold_range, cmap = 'plasma',s = 12,zorder = 3)
     
-    #### Indicate maximum AUC
-    auc_max = round(max(auc_scores),4)
+    if time_bin:
+        #### Print time bin
+        ax.text(0.975,0.025,'Time Bin {} to {}'.format(time_bin[0],time_bin[1]),transform = fig.transFigure,ha = 'right',fontsize = 10)    
     
     #### Print max AUC
-    auc_max_text = 'Max AUC = {}'.format(auc_max)
+    auc_max_text = 'Max AUC = {}, at {:.2e}'.format(round(optimal_auc,4),optimal_cut_off)
     ax.add_artist(AnchoredText(auc_max_text,prop=dict(size=10), frameon=False,loc = 4))
     
     #### Set axis labels
@@ -979,13 +1023,31 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
     fig.set_figwidth(8)
 
     #### Set save path
-    save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\AUC".format(data_path)
+    if time_bin:
+        save_path = "{}\ROC\\Time Bins\\Cut Off\\{}\\{} to {}\\AUC".format(data_path,cut_off_parameter_name,time_bin[0],time_bin[1])
+    else:
+        save_path = "{}\ROC\\Arbitrary Parameter With Cut Off\\AUC".format(data_path)
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')
 
     #### Save fig
     plt.savefig('{}\AUC of {} vs {} Min {} Max {} N {}.png'.format(save_path,parameter_name.title(),cut_off_parameter_name.title(),round(min(cut_off_threshold_range),4),round(max(cut_off_threshold_range),4),len(cut_off_threshold_range)),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
+    #### Close fig
+    plt.close()
+
+    
+    #################################
+    ### Plot ROC of optimal value ###
+    #################################
+    
+    optimal_threshold = PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name,time_bin,cut_off_parameter_name,optimal_cut_off)
+    
+    #### Close fig
+    plt.close()
+    
+    if time_bin:
+        return optimal_auc, optimal_cut_off, optimal_threshold
 
 def PlotROCSplinePredictionWithParameterThreshold(marker_kinematics,time_within,confidence_threshold_range,parameter_name,parameter_threshold_range,mode = 'combine'):
     """
@@ -2603,7 +2665,7 @@ def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thres
         #### Save fig
         plt.savefig('{}\\{} threshold histogram time bin {} to {}'.format(save_path,parameter_name,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
         
-def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_threshold,sp_acceleration_threshold,num_pts = 10):
+def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_threshold,sp_acceleration_threshold,num_pts = 10,mode = 'normal'):
     '''
     Plots the spline computation for every marker in the specified time bin and compares it with the computed threshold
     
@@ -2642,7 +2704,11 @@ def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_
     #### Within time bin
     marker_data_to_plot = marker_data_to_plot[np.logical_and(marker_data_to_plot.time_interval >= time_bin[0],marker_data_to_plot.time_interval <= time_bin[1])]
     
-    for timestamp, site_id, crack_id in marker_data_to_plot[['timestamp','site_id','crack_id']].values:
+    for fig_num,(timestamp, site_id, crack_id) in enumerate(marker_data_to_plot[['timestamp','site_id','crack_id']].values):
+        
+        #### Skip to specified figure number
+#        if fig_num <= 0:
+#            continue
         
         #### Get the site and marker data
         marker_data = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.site_id == site_id,marker_kinematics_with_condition.crack_id == crack_id)]
@@ -2671,14 +2737,36 @@ def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_
         
         #### Commence interpolation
         try:
-            #### Take the gaussian average of data points and its variance
-            _,var = moving_average(meas)
-            sp = UnivariateSpline(time,meas,w=1/np.sqrt(var))
-            
-            #### Spline interpolation values    
-            disp_int = sp(time_int)
-            vel_int = sp.derivative(n=1)(time_int)
-            acc_int = sp.derivative(n=2)(time_int)
+            if mode == 'normal':
+                #### Take the gaussian average of data points and its variance
+                _,var = moving_average(meas)
+                sp = UnivariateSpline(time,meas,w=1/np.sqrt(var))
+                
+                #### Spline interpolation values    
+                disp_int = sp(time_int)
+                vel_int = sp.derivative(n=1)(time_int)
+                acc_int = sp.derivative(n=2)(time_int)
+            elif mode == '0.15 sf':
+                #### Interpolate without using weighting functions
+                sp = UnivariateSpline(time,meas)
+                
+                #### Set smoothing factor to 0.15
+                sp.set_smoothing_factor(0.15)
+                
+                #### Spline interpolation values
+                disp_int = sp(time_int)
+                vel_int = sp.derivative(n=1)(time_int)
+                acc_int = sp.derivative(n=2)(time_int)
+                
+            elif mode == 'polyfit 4':
+                #### Interpolate using polyfit deg 4
+                coeff = np.polyfit(time,meas,4)
+                polynomial = np.poly1d(coeff)
+                
+                #### Interpolation values
+                disp_int = polynomial(time_int)
+                vel_int = polynomial.deriv(1)(time_int)
+                acc_int = polynomial.deriv(2)(time_int)
 
         except:
             print "Interpolation error {} {}".format(marker_data.site_id.values[0],marker_data.crack_id.values[0])
@@ -2798,17 +2886,74 @@ def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_
         fig.subplots_adjust(top = 0.92,bottom = 0.11,left = 0.08,right = 0.92,hspace = 0.05, wspace = 0.05)
         
         #### Set savefig directory
-        save_path = "{}\\Interpolations\\{} to {}".format(data_path,time_bin[0],time_bin[1])
-        if not os.path.exists(save_path+'/'):
-            os.makedirs(save_path+'/')   
+        if mode == 'normal':
+            save_path = "{}\\Interpolations\\Default\\{} to {}".format(data_path,time_bin[0],time_bin[1])
+            if not os.path.exists(save_path+'/'):
+                os.makedirs(save_path+'/')
+        else:
+            save_path = "{}\\Interpolations\\{}\\{} to {}".format(data_path,mode,time_bin[0],time_bin[1])
+            if not os.path.exists(save_path+'/'):
+                os.makedirs(save_path+'/')
             
         #### Save fig
-        plt.savefig('{}\\{} {} {}'.format(save_path,marker_data.iloc[-1].timestamp.strftime("%Y-%m-%d_%H-%M"),marker_data.iloc[-1].site_id.upper(),marker_data.iloc[-1].crack_id.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        plt.savefig('{}\\{} {} {} {}'.format(save_path,fig_num +1,marker_data.iloc[-1].timestamp.strftime("%Y-%m-%d_%H-%M"),marker_data.iloc[-1].site_id.upper(),marker_data.iloc[-1].crack_id.title()),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
         
         #### Close fig
         plt.close()
         
+def OptimalThresholdPlots(marker_kinematics,time_within,parameters,cut_off_parameter,cut_off_parameter_range,time_bins):
+    """
+    Generates all ROC plots and optimal threshold plots 
+        (i) AUC vs Parameter
+        (ii) Parameter vs Time interval
+        (iii) cut off vs time interval
+        (iv) cut off vs time interval for all
+        (v) histogram per parameter
+        (vi) histogram of site per parameter
+        
+    Parameters
+    ---------------------------
+    marker_kinematics - pd.DataFrame()
+        Data frame containing the marker data with kinematic data
+    time_within - float
+        time in hours of the defined time interval between measurements
+    parameters - list
+        List containing all parameter names
+    cut_off_parameter_name - string
+        Name of the cut off parameter
+    cut_off_parameter_range - list
+        Range of the value of the cut off parameter
+    time_bins - list
+        List of the defined time bins
+    
+    Returns
+    ---------------------------
+    None
+    """
+    
+    #### Initialize results container
+    results = pd.DataFrame(columns = ['parameter','time_bin','auc','cut_off','optimal_value'])
 
+    #### Iterate with respect to parameters then time bin
+    for time_bin in time_bins:
+        
+        for parameter in parameters:
+            #### Generate ROC AUC plots and collect results
+            auc, cut_off, optimal_value = PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,72,parameter,cut_off_parameter,cut_off_parameter_range,time_bin)
+            
+            #### Save results to container
+            results.append(pd.DataFrame([{'parameter':parameter,'time_bin':'{} to {}'.format(time_bin[0],time_bin[1]),'auc':auc,'cut_off':cut_off,'optimal_value':optimal_value}]),ignore_index = True,inplace = True)
+            
+            ############################################
+            #### Plot AUC vs Parameter per time bin ####
+            ############################################
+            
+            #### Initialize figure
+            fig = plt.figure()
+            
+            #### Plot results
+            results[results.time_bin == time_bin].plot.barh(x = ['parameter'],y = ['auc'])
+            
 
 
 
@@ -2831,5 +2976,4 @@ def PlotSplineVelComputation(marker_kinematics,time_within,time_bin,sp_velocity_
 
     
     
-                                               
                                                
