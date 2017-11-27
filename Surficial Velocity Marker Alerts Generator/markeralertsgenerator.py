@@ -247,10 +247,7 @@ def PrecededAcceleration(marker_data):
     
     #### Get marker data that preceded an increase in velocity
     marker_data_preceding_acceleration = marker_data[marker_data.velocity.values <= marker_data.shift(-1).velocity.fillna(0).values]
-    
-    #### Get only non-zero velocity values    
-    marker_data_preceding_acceleration = marker_data_preceding_acceleration[marker_data_preceding_acceleration.velocity != 0]
-        
+            
     return marker_data_preceding_acceleration
 
 def PrecededAccelerationWithTime(marker_data,time_within):
@@ -273,10 +270,7 @@ def PrecededAccelerationWithTime(marker_data,time_within):
     """
     #### Get marker data that preceded an increase in velocity
     marker_data_preceding_acceleration = marker_data[np.logical_and(marker_data.velocity.values <= marker_data.shift(-1).velocity.fillna(0).values,marker_data.shift(-1).time_interval <= time_within)]
-    
-    #### Get only non-zero velocity values    
-    marker_data_preceding_acceleration = marker_data_preceding_acceleration[marker_data_preceding_acceleration.velocity != 0]
-        
+            
     return marker_data_preceding_acceleration
     
 def PrecededDecelerationWithTime(marker_data,time_within):
@@ -299,10 +293,7 @@ def PrecededDecelerationWithTime(marker_data,time_within):
     """
     #### Get marker data that preceded a decrease in velocity
     marker_data_preceding_acceleration = marker_data[np.logical_and(marker_data.velocity.values > marker_data.shift(-1).velocity.fillna(0).values,marker_data.shift(-1).time_interval <= time_within)]
-    
-    #### Get only non-zero velocity values    
-    marker_data_preceding_acceleration = marker_data_preceding_acceleration[marker_data_preceding_acceleration.velocity != 0]
-    
+        
     return marker_data_preceding_acceleration
 
 def MarkTrueConditions(marker_kinematics,time_within):
@@ -844,7 +835,7 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name,time_
     #### Cut off filter
     if cut_off_parameter_name or cut_off_value:
         marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition[cut_off_parameter_name] >= cut_off_value]
-    
+
     #### Get false positive rates and true positive rates and corresponding thresholds
     fpr, tpr, thresholds = metrics.roc_curve(marker_kinematics_with_condition.condition.values,marker_kinematics_with_condition[parameter_name].values)
     
@@ -853,7 +844,7 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name,time_
     
     #### Compute for Youden Index
     roc_results['yi'] = tpr - fpr
-        
+
     #### Get maximum Youden Index
     max_YI = max(roc_results.yi)
     
@@ -2653,7 +2644,7 @@ def PlotOptimalThresholdResults(time_bins,thresholds,parameter_name,cut_off_para
     else:
         plt.savefig('{}\\{} threshold vs time bins'.format(save_path,parameter_name),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
     
-def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thresholds,time_bins,bins = 1000,mode = None):
+def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thresholds,time_bins,bins = 1000,mode = None,cut_off_parameter = None, cut_off_values = None):
     """
     Plots the histogram of specified parameter and compares it with the optimal cut off threshold
     
@@ -2674,27 +2665,34 @@ def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thres
     -------------------
     Plots the optimal threshold vs time bins
     """
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_kinematics.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+    
+    #### Get only succeded within specified time
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+    
+    #### Apply preceded functions
+    preceded_acceleration = marker_kinematics_with_condition[marker_kinematics_with_condition.condition == 1]
+    preceded_deceleration = marker_kinematics_with_condition[marker_kinematics_with_condition.condition == -1]
+    
+    #### Filter values
     if parameter_name == 'sp_velocity':
-        #### Get data frame preceding acceleration filtered values
-        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 1],time_within)
-        
-        #### Get data frame preceding deceleration filtered values
-        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 1],time_within)
-        
+        filter_value = 3
     elif parameter_name == 'sp_acceleration':
-        #### Get data frame preceding acceleration filtered values
-        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 0.002],time_within)
-        
-        #### Get data frame preceding deceleration filtered values
-        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 0.002],time_within)
-        
+        filter_value = 0.002
     else:
-        #### Get data frame preceding acceleration filtered values
-        preceded_acceleration = PrecededAccelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 100],time_within)
+        filter_value = 100
         
-        #### Get data frame preceding deceleration filtered values
-        preceded_deceleration = PrecededDecelerationWithTime(marker_kinematics[marker_kinematics[parameter_name].values <= 100],time_within)
-
+    #### Get data frame preceding acceleration filtered values
+    preceded_acceleration = preceded_acceleration[preceded_acceleration[parameter_name].values <= filter_value]
+    preceded_deceleration = preceded_deceleration[preceded_deceleration[parameter_name].values <= filter_value]
+    
+    #### Filter displacment
+    preceded_acceleration = preceded_acceleration[preceded_acceleration.displacement > 0][preceded_acceleration.displacement <= 100]
+    preceded_deceleration = preceded_deceleration[preceded_deceleration.displacement > 0][preceded_deceleration.displacement <= 100]
     
     #### Initialize xlabels and fig title
     if parameter_name == 'sp_velocity':
@@ -2713,19 +2711,31 @@ def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thres
     #### Plot threshold lines and annotations
     for i,(time_bin,threshold) in enumerate(zip(time_bins,thresholds)):
         
+        #### Get current df
+        cur_df_deceleration = preceded_deceleration[np.logical_and(preceded_deceleration.time_interval >= time_bin[0],preceded_deceleration.time_interval <= time_bin[1])]
+        cur_df_acceleration = preceded_acceleration[np.logical_and(preceded_acceleration.time_interval >= time_bin[0],preceded_acceleration.time_interval <= time_bin[1])]
+
         #### Initialize figure and axes
         fig = plt.figure()
         ax = fig.add_subplot(111)
         
+        #### Filter cut off values
+        if mode == 'cut_off':
+            cur_df_deceleration = cur_df_deceleration[cur_df_deceleration[cut_off_parameter] >= cut_off_values[i]]
+            cur_df_acceleration = cur_df_acceleration[cur_df_acceleration[cut_off_parameter] >= cut_off_values[i]]
+        elif mode == 'reverse_cut_off':
+            cur_df_deceleration = cur_df_deceleration[cur_df_deceleration[cut_off_parameter] < cut_off_values[i]]
+            cur_df_acceleration = cur_df_acceleration[cur_df_acceleration[cut_off_parameter] < cut_off_values[i]]
+
         #### Plot histogram of data within time bin
-        preceded_deceleration[np.logical_and(preceded_deceleration.time_interval >= time_bin[0],preceded_deceleration.time_interval <= time_bin[1])][parameter_name].hist(bins = bins,zorder = 3,color = tableau20[6],ax = ax,label = 'Deceleration')
-        preceded_acceleration[np.logical_and(preceded_acceleration.time_interval >= time_bin[0],preceded_acceleration.time_interval <= time_bin[1])][parameter_name].hist(bins = bins,zorder = 4,color = tableau20[4],ax = ax,alpha = 0.75,label = 'Acceleration')
+        cur_df_deceleration[parameter_name].hist(bins = bins,zorder = 3,color = tableau20[6],ax = ax,label = 'Deceleration')
+        cur_df_acceleration[parameter_name].hist(bins = bins,zorder = 4,color = tableau20[4],ax = ax,alpha = 0.75,label = 'Acceleration')
         
         #### Plotting threshold line
         ax.axvline(threshold,ls = '--',color = tableau20[16],zorder = 5,alpha = 0.75,label = 'Threshold')
         
-        #### Print time bin
-        ax.text(0.975,0.025,'Time Bin {} to {}'.format(time_bin[0],time_bin[1]),transform = fig.transFigure,ha = 'right',fontsize = 10)
+        #### Print time bin and number of bins and positives and negatives
+        ax.text(0.975,0.025,'{} to {}\n{} Bins\nPos {} Neg {}'.format(time_bin[0],time_bin[1],bins,len(cur_df_acceleration),len(cur_df_deceleration)),transform = fig.transFigure,ha = 'right',fontsize = 10)
         
         #### Set axis labels
         ax.set_xlabel(label,fontsize = 14)
@@ -2745,13 +2755,18 @@ def PlotHistogramForThreshold(marker_kinematics,parameter_name,time_within,thres
         #### Set save path
         if mode == 'cut_off':
             save_path = "{}\\Histograms\\Cut Off\\{}".format(data_path,parameter_name)
+        elif mode == 'reverse_cut_off':
+            save_path = "{}\\Histograms\\Reverse Cut Off\\{}".format(data_path,parameter_name)
         else:
             save_path = "{}\\Histograms\\Thresholds\\{}".format(data_path,parameter_name)
         if not os.path.exists(save_path+'/'):
             os.makedirs(save_path+'/')   
             
         #### Save fig
-        plt.savefig('{}\\{} threshold histogram time bin {} to {}'.format(save_path,parameter_name,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        if mode == 'cut_off' or mode == 'reverse_cut_off':
+            plt.savefig('{}\\{} bins {} threshold histogram time bin {} to {}'.format(save_path,bins,parameter_name,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        else:
+            plt.savefig('{}\\{} threshold histogram time bin {} to {}'.format(save_path,parameter_name,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
         
         #### Close fig
         plt.close()
@@ -3035,7 +3050,7 @@ def ObtainOptimalThresholds(marker_kinematics,time_within,parameters,cut_off_par
     return optimal_thresholds
         
         
-def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds):
+def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds,bins = 500):
     """
     Generates all ROC plots and optimal threshold plots 
         (i) AUC vs Parameter
@@ -3248,23 +3263,60 @@ def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds):
 #        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
 #        
 #        #### Plot results
-#        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = 1000,mode = 'cut_off')    
-        
-    #########################################
-    #### Plot Per Site Marker Data Count ####
-    #########################################
+#        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
+#
+#    #########################################################################
+#    #### Plot Cut Off Non-excedance Histogram for Parameter per Time Bin ####
+#    #########################################################################
+#    
+#    #### Iterate for every parameter
+#    for parameter in np.unique(optimal_thresholds.parameter):
+#
+#        #### Get current data frame
+#        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
+#        
+#        #### Get time bins
+#        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+#        
+#        #### Plot results
+#        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'reverse_cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
+#
+#    #########################################
+#    #### Plot Per Site Marker Data Count ####
+#    #########################################
     
     #### Iterate for every parameter
     for parameter in np.unique(optimal_thresholds.parameter):
         
+        #### Get current data frame
+        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
+        
+        #### Get time bins
+        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+        
         #### Iterate for every time bin
-        for time_bin in np.unique(optimal_thresholds.time_bin):
+        for time_bin in time_bins:
             
-            #### Get current data frame
-            cur_df = optimal_thresholds[np.logical_and(optimal_thresholds.parameter == parameter,optimal_thresholds.time_bin == time_bin)]
+            #### Get current optimal thresholds data frame
+            cur_df = optimal_thresholds[np.logical_and(optimal_thresholds.parameter == parameter,optimal_thresholds.time_bin == '{} to {}'.format(time_bin[0],time_bin[1]))]
+            
+            #### Get only values taken within specified time_within
+            cur_marker_df = SuccededWithinTime(marker_kinematics,time_within)
+            
+            #### Get only non-zero displacement values
+            cur_marker_df = cur_marker_df[cur_marker_df.displacement != 0]
+            
+            #### Get only displacement values < 100 cm
+            cur_marker_df = cur_marker_df[cur_marker_df.displacement <= 100]
+
+            #### Get only specified time bin
+            cur_marker_df = cur_marker_df[np.logical_and(cur_marker_df.time_interval >= time_bin[0],cur_marker_df.time_interval <= time_bin[1])]
+            
+            #### Cut off filter
+            cur_marker_df = cur_marker_df[cur_marker_df[cur_df.cut_off_parameter.values[0]] >= cur_df.cut_off.values[0]]
             
             #### Get marker count df
-            marker_count = GetPerSiteMarkerDataCount(cur_df,time_within)
+            marker_count = GetPerSiteMarkerDataCount(cur_marker_df,time_within)
             
             ax = marker_count.plot.barh(y = ['Marker Data'],stacked = True)
             
@@ -3287,7 +3339,7 @@ def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds):
             fig.set_figwidth(13)
             
             #### Set save path
-            save_path = "{}\\Histograms\\Cut Off\\{}".format(data_path,parameter_name)
+            save_path = "{}\\Histograms\\Cut Off\\{}\\Data Count".format(data_path,parameter)
             if not os.path.exists(save_path+'/'):
                 os.makedirs(save_path+'/')
             
@@ -3296,6 +3348,8 @@ def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds):
             
             ### Close fig
             plt.close()
+
+
     
     
     
