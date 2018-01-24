@@ -875,7 +875,7 @@ def PlotROCArbitraryParameter(marker_kinematics,time_within,parameter_name,time_
     max_yi_line, = ax.plot([optimized_fpr],[optimized_tpr],'o--',color = tableau20[16],label = 'Max YI',markersize = 4)
     
     #### Print AUC ROC result
-    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}'.format(round(auc,4),round(max_YI,4),optimized_threshold),transform = ax.transAxes,ha = 'right',fontsize = 12)
+    ax.text(0.975,0.025,'Area under the ROC = {}\nMax YI = {}, at {:.2e}\nTPR {:.1f}% FPR {:.1f}%'.format(round(auc,4),round(max_YI,4),optimized_threshold,round(optimized_tpr,4)*100,round(optimized_fpr,4)*100),transform = ax.transAxes,ha = 'right',fontsize = 10)
     
     if time_bin or cut_off_value:
         #### Print number of data points and time bin
@@ -948,6 +948,9 @@ def PlotROCArbitraryParameterWithParameterCutOff(marker_kinematics,time_within,p
     
     #### Get only non-zero displacement values
     marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement with <= 100
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
     
     #### Initialize figure, open subplot
     fig = plt.figure()
@@ -1305,7 +1308,7 @@ def GetPerSiteMarkerDataCount(marker_kinematics,time_within):
                      
     return marker_data_count
 
-def MarkerDataCountPlots(marker_data_count):
+def MarkerDataCountPlots(marker_data_count,time_bins = None):
     """
     Plots all marker data count bar plots from the marker data count data frame
 
@@ -1575,6 +1578,8 @@ def MarkerDataCountPlots(marker_data_count):
     
     ### Close fig
     plt.close()
+    
+    
 
 def PlotROCArbitraryParameterPerSite(marker_kinematics,time_within,parameter_name,site):
     """
@@ -3074,216 +3079,216 @@ def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds,bins 
     None
     """
     
-#    ############################################
-#    #### Plot AUC vs Parameter Per Time Bin ####
-#    ############################################
-#    
-#    #### Iterate for all time bins
-#    for i,time_bin in enumerate(np.unique(optimal_thresholds.time_bin.values)):
-#        
-#        #### Get current df
-#        cur_df = optimal_thresholds[optimal_thresholds.time_bin == time_bin]
-#        
-#        #### Initialize figure
-#        fig = plt.figure()
-#        ax = fig.add_subplot(111)
-#        
-#        #### Plot to current figure
-#        cur_df.plot.bar(x = ['parameter'],y = ['auc'],color = tableau20[(i)*2],ax = ax,align = 'center',width = 0.40)
-#        
-#        #### Rotate x ticks
-#        plt.xticks(rotation = 'horizontal',fontsize = 12)
-#        
-#        #### Set ylim
-#        ax.set_ylim([0.950*min(optimal_thresholds.auc.values),max(optimal_thresholds.auc.values)*1.05])
-#        
-#        #### Set axis labels
-#        ax.set_ylabel('AUC',fontsize = 14)
-#        ax.set_xlabel('Parameters',fontsize = 14)
-#        
-#        #### Hide legend
-#        ax.legend().set_visible(False)
-#        
-#        #### Set fig sup title
-#        fig.suptitle('AUC vs Parameter Plot for Time Bin {}'.format(time_bin),fontsize = 16)
-#        
-#        #### Set fig size 
-#        fig.set_figwidth(11)
-#        fig.set_figheight(8)
-#        
-#        #### Set save path
-#        save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\AUC vs Parameter\\".format(data_path,np.unique(optimal_thresholds.cut_off_parameter.values)[0])
-#        if not os.path.exists(save_path+'/'):
-#            os.makedirs(save_path+'/')
-#
-#        #### Save fig
-#        plt.savefig('{}\\{}'.format(save_path,time_bin),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
-#        
-#        ### Close fig
-#        plt.close()
-        
-#    ############################################
-#    #### Plot AUC vs Parameter ALL Time Bin ####
-#    ############################################
-#
-#    #### Initialize figure and subplot
-#    fig = plt.figure()
-#    ax = fig.add_subplot(111)
-#    
-#    #### Initialize colors container
-#    colors = {}
-#    
-#    #### Set colors
-#    for i, time_bin in enumerate(np.unique(optimal_thresholds.time_bin.values)):
-#        colors[time_bin] = tableau20[(i)*2]
-#    
-#    #### Plot data
-#    optimal_thresholds.plot.bar(x = ['parameter'],y = ['auc'],color = [colors[i] for i in optimal_thresholds['time_bin']],ax = ax,align = 'center',width = 0.40)
-#    
-#    #### Rotate x ticks
-#    plt.xticks(rotation = 70,fontsize = 10, ha = 'right')
-#    
-#    #### Label containers
-#    handles = []
-#    
-#    #### Set label for each time bin
-#    for i,container in enumerate(ax.containers[0]):
-#        if i % 4 == 0:
-#            container.set_label(optimal_thresholds.time_bin.values[i])
-#            handles.append(container)
-#    
-#    #### Remove legend frame
-#    ax.legend(handles = handles).get_frame().set_visible(False)
-#    
-#    #### Set ylim
-#    ax.set_ylim([0.950*min(optimal_thresholds.auc.values),max(optimal_thresholds.auc.values)*1.05])
-#    
-#    #### Set axis labels
-#    ax.set_ylabel('AUC',fontsize = 14)
-#    ax.set_xlabel('Parameters',fontsize = 14)
-#        
-#    #### Set fig sup title
-#    fig.suptitle('AUC vs Parameter'.format(time_bin),fontsize = 16)
-#    
-#    #### Set fig size 
-#    fig.set_figwidth(15)
-#    fig.set_figheight(10)
-#    
-#    #### Set fig spacing
-#    fig.subplots_adjust(top = 0.92,bottom = 0.17,left = 0.07,right = 0.95)
-#    
-#    #### Set save path
-#    save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\AUC vs Parameter\\".format(data_path,np.unique(optimal_thresholds.cut_off_parameter.values)[0])
-#    if not os.path.exists(save_path+'/'):
-#        os.makedirs(save_path+'/')
-#
-#    #### Save fig
-#    plt.savefig('{}\\ALL'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
-#    
-#    #### Close fig
-#    plt.close()
+    ############################################
+    #### Plot AUC vs Parameter Per Time Bin ####
+    ############################################
     
-#    #################################################
-#    #### Plot Optimal Parameter vs Time Interval ####
-#    #################################################
-#    
-#    #### Iterate for every parameter
-#    for parameter in np.unique(optimal_thresholds.parameter):
-#
-#        #### Get current data frame
-#        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
-#        
-#        #### Get time bins
-#        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
-#        
-#        #### Plot results
-#        PlotOptimalThresholdResults(time_bins,cur_df.optimal_value.values,parameter,cur_df.cut_off_parameter.values[0])
-#        
-#        #### Close fig
-#        plt.close()
-#        
-#    #############################################################
-#    #### Plot Optimal Cut Off vs Time Interval Per Parameter ####
-#    #############################################################
-#
-#        PlotOptimalThresholdResults(time_bins,cur_df.cut_off.values,parameter,cur_df.cut_off_parameter.values[0],mode = 'cut_off')
-#        
-#        #### Close fig
-#        plt.close()
-#    
-#    #################################################################
-#    #### Plot Optimal Cut Off vs Time Interval For ALL Parameter ####
-#    #################################################################
-#    
-#    #### Initialize figure
-#    fig = plt.figure()
-#    ax = fig.add_subplot(111)
-#    
-#    #### Offset optimal thresholds parameter
-#    optimal_thersholds_off_set = offset_cut_off(optimal_thresholds)
-#    
-#    #### Iterate for every parameter
-#    for i,parameter in enumerate(np.unique(optimal_thresholds.parameter)):
-#        
-#        #### Get current data frame
-#        cur_df = optimal_thersholds_off_set[optimal_thersholds_off_set.parameter == parameter]
-#        
-#        #### Get time bins
-#        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
-#        
-#        #### Plot results
-#        PlotOptimalThresholdResults(time_bins,cur_df.cut_off.values,parameter,cur_df.cut_off_parameter.values[0],mode = 'cut_off_all')
-#    
-#    #### Plot legend handles
-#    velocity_line, = ax.plot([],[],color = tableau20[6], label = 'Velocity')
-#    displacement_line, = ax.plot([],[],color = tableau20[2], label = 'Displacement')
-#    sp_velocity_line, = ax.plot([],[],color = tableau20[4], label = 'Spline Velocity')
-#    sp_acceleration_line, = ax.plot([],[],color = tableau20[16], label = 'Spline Acceleration')
-#    
-#    #### Plot legend
-#    ax.legend(handles = [sp_acceleration_line,sp_velocity_line,displacement_line,velocity_line])
-#    
-#    #### Set save path
-#    save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\Optimal Value\\Cut Off".format(data_path,optimal_thersholds_off_set.cut_off_parameter.values[0])
-#    
-#    #### Save fig
-#    plt.savefig('{}\\ALL threshold vs time bins'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
-#    
-#    ###################################################
-#    #### Plot Histogram for Parameter per Time Bin ####
-#    ###################################################
-#    
-#    #### Iterate for every parameter
-#    for parameter in np.unique(optimal_thresholds.parameter):
-#
-#        #### Get current data frame
-#        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
-#        
-#        #### Get time bins
-#        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
-#        
-#        #### Plot results
-#        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
-#
-#    #########################################################################
-#    #### Plot Cut Off Non-excedance Histogram for Parameter per Time Bin ####
-#    #########################################################################
-#    
-#    #### Iterate for every parameter
-#    for parameter in np.unique(optimal_thresholds.parameter):
-#
-#        #### Get current data frame
-#        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
-#        
-#        #### Get time bins
-#        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
-#        
-#        #### Plot results
-#        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'reverse_cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
-#
-#    #########################################
-#    #### Plot Per Site Marker Data Count ####
-#    #########################################
+    #### Iterate for all time bins
+    for i,time_bin in enumerate(np.unique(optimal_thresholds.time_bin.values)):
+        
+        #### Get current df
+        cur_df = optimal_thresholds[optimal_thresholds.time_bin == time_bin]
+        
+        #### Initialize figure
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        
+        #### Plot to current figure
+        cur_df.plot.bar(x = ['parameter'],y = ['auc'],color = tableau20[(i)*2],ax = ax,align = 'center',width = 0.40)
+        
+        #### Rotate x ticks
+        plt.xticks(rotation = 'horizontal',fontsize = 12)
+        
+        #### Set ylim
+        ax.set_ylim([0.950*min(optimal_thresholds.auc.values),max(optimal_thresholds.auc.values)*1.05])
+        
+        #### Set axis labels
+        ax.set_ylabel('AUC',fontsize = 14)
+        ax.set_xlabel('Parameters',fontsize = 14)
+        
+        #### Hide legend
+        ax.legend().set_visible(False)
+        
+        #### Set fig sup title
+        fig.suptitle('AUC vs Parameter Plot for Time Bin {}'.format(time_bin),fontsize = 16)
+        
+        #### Set fig size 
+        fig.set_figwidth(11)
+        fig.set_figheight(8)
+        
+        #### Set save path
+        save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\AUC vs Parameter\\".format(data_path,np.unique(optimal_thresholds.cut_off_parameter.values)[0])
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')
+
+        #### Save fig
+        plt.savefig('{}\\{}'.format(save_path,time_bin),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        ### Close fig
+        plt.close()
+        
+    ############################################
+    #### Plot AUC vs Parameter ALL Time Bin ####
+    ############################################
+
+    #### Initialize figure and subplot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Initialize colors container
+    colors = {}
+    
+    #### Set colors
+    for i, time_bin in enumerate(np.unique(optimal_thresholds.time_bin.values)):
+        colors[time_bin] = tableau20[(i)*2]
+    
+    #### Plot data
+    optimal_thresholds.plot.bar(x = ['parameter'],y = ['auc'],color = [colors[i] for i in optimal_thresholds['time_bin']],ax = ax,align = 'center',width = 0.40)
+    
+    #### Rotate x ticks
+    plt.xticks(rotation = 70,fontsize = 10, ha = 'right')
+    
+    #### Label containers
+    handles = []
+    
+    #### Set label for each time bin
+    for i,container in enumerate(ax.containers[0]):
+        if i % 4 == 0:
+            container.set_label(optimal_thresholds.time_bin.values[i])
+            handles.append(container)
+    
+    #### Remove legend frame
+    ax.legend(handles = handles).get_frame().set_visible(False)
+    
+    #### Set ylim
+    ax.set_ylim([0.950*min(optimal_thresholds.auc.values),max(optimal_thresholds.auc.values)*1.05])
+    
+    #### Set axis labels
+    ax.set_ylabel('AUC',fontsize = 14)
+    ax.set_xlabel('Parameters',fontsize = 14)
+        
+    #### Set fig sup title
+    fig.suptitle('AUC vs Parameter'.format(time_bin),fontsize = 16)
+    
+    #### Set fig size 
+    fig.set_figwidth(15)
+    fig.set_figheight(10)
+    
+    #### Set fig spacing
+    fig.subplots_adjust(top = 0.92,bottom = 0.17,left = 0.07,right = 0.95)
+    
+    #### Set save path
+    save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\AUC vs Parameter\\".format(data_path,np.unique(optimal_thresholds.cut_off_parameter.values)[0])
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')
+
+    #### Save fig
+    plt.savefig('{}\\ALL'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    #### Close fig
+    plt.close()
+    
+    #################################################
+    #### Plot Optimal Parameter vs Time Interval ####
+    #################################################
+    
+    #### Iterate for every parameter
+    for parameter in np.unique(optimal_thresholds.parameter):
+
+        #### Get current data frame
+        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
+        
+        #### Get time bins
+        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+        
+        #### Plot results
+        PlotOptimalThresholdResults(time_bins,cur_df.optimal_value.values,parameter,cur_df.cut_off_parameter.values[0])
+        
+        #### Close fig
+        plt.close()
+        
+    #############################################################
+    #### Plot Optimal Cut Off vs Time Interval Per Parameter ####
+    #############################################################
+
+        PlotOptimalThresholdResults(time_bins,cur_df.cut_off.values,parameter,cur_df.cut_off_parameter.values[0],mode = 'cut_off')
+        
+        #### Close fig
+        plt.close()
+    
+    #################################################################
+    #### Plot Optimal Cut Off vs Time Interval For ALL Parameter ####
+    #################################################################
+    
+    #### Initialize figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Offset optimal thresholds parameter
+    optimal_thersholds_off_set = offset_cut_off(optimal_thresholds)
+    
+    #### Iterate for every parameter
+    for i,parameter in enumerate(np.unique(optimal_thresholds.parameter)):
+        
+        #### Get current data frame
+        cur_df = optimal_thersholds_off_set[optimal_thersholds_off_set.parameter == parameter]
+        
+        #### Get time bins
+        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+        
+        #### Plot results
+        PlotOptimalThresholdResults(time_bins,cur_df.cut_off.values,parameter,cur_df.cut_off_parameter.values[0],mode = 'cut_off_all')
+    
+    #### Plot legend handles
+    velocity_line, = ax.plot([],[],color = tableau20[6], label = 'Velocity')
+    displacement_line, = ax.plot([],[],color = tableau20[2], label = 'Displacement')
+    sp_velocity_line, = ax.plot([],[],color = tableau20[4], label = 'Spline Velocity')
+    sp_acceleration_line, = ax.plot([],[],color = tableau20[16], label = 'Spline Acceleration')
+    
+    #### Plot legend
+    ax.legend(handles = [sp_acceleration_line,sp_velocity_line,displacement_line,velocity_line])
+    
+    #### Set save path
+    save_path = "{}\\ROC\\Optimal Parameters\\Cut Off\\{}\\Optimal Value\\Cut Off".format(data_path,optimal_thersholds_off_set.cut_off_parameter.values[0])
+    
+    #### Save fig
+    plt.savefig('{}\\ALL threshold vs time bins'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    ###################################################
+    #### Plot Histogram for Parameter per Time Bin ####
+    ###################################################
+    
+    #### Iterate for every parameter
+    for parameter in np.unique(optimal_thresholds.parameter):
+
+        #### Get current data frame
+        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
+        
+        #### Get time bins
+        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+        
+        #### Plot results
+        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
+
+    #########################################################################
+    #### Plot Cut Off Non-excedance Histogram for Parameter per Time Bin ####
+    #########################################################################
+    
+    #### Iterate for every parameter
+    for parameter in np.unique(optimal_thresholds.parameter):
+
+        #### Get current data frame
+        cur_df = optimal_thresholds[optimal_thresholds.parameter == parameter]
+        
+        #### Get time bins
+        time_bins = map(lambda x:tuple(map(lambda y:int(y),x.split(' to '))),cur_df.time_bin.values)
+        
+        #### Plot results
+        PlotHistogramForThreshold(marker_kinematics,parameter,time_within,cur_df.optimal_value.values,time_bins,bins = bins,mode = 'reverse_cut_off',cut_off_parameter = 'displacement',cut_off_values = cur_df.cut_off.values)    
+
+    #########################################
+    #### Plot Per Site Marker Data Count ####
+    #########################################
     
     #### Iterate for every parameter
     for parameter in np.unique(optimal_thresholds.parameter):
@@ -3349,13 +3354,98 @@ def OptimalThresholdPlots(marker_kinematics,time_within,optimal_thresholds,bins 
             ### Close fig
             plt.close()
 
+def PlotDataCountPerTimeBin(marker_kinematics,time_within,time_bins):
+    """
+    Plot data count per time bin per parameter
+    
+    Parameters
+    ---------------------------
+    marker_kinematics - pd.DataFrame()
+        Marker kinematics data frame
+    time_witin - float
+        Time in hours of the defined time interval between measurements
+    time_bins - list
+        List of the defined time bins
 
+    Returns
+    ---------------------------
+    None
+    """
     
+    #### Iterate for every time bin
+    for time_bin in time_bins:
+        
+        #### Get current marker df
+        cur_df = marker_kinematics[np.logical_and(marker_kinematics.time_interval >= time_bin[0],marker_kinematics.time_interval <= time_bin[1])]
+        
+        #### Displacement filters
+        cur_df = cur_df[cur_df.displacement != 0]
+        cur_df = cur_df[cur_df.displacement <= 100]
+        
+        #### Get current marker data count df
+        cur_marker_count_df = GetPerSiteMarkerDataCount(cur_df,time_within)
+        
+        
+        #### Plot results
+        ax = cur_marker_count_df.plot.barh(y = ['Marker Data'],stacked = True)
+        
+        #### Get current figure
+        fig = plt.gcf()
+        
+        #### Set y labels and figure title
+        ax.set_ylabel('Site Code',fontsize = 14)
+        ax.set_xlabel('Count',fontsize = 14)
+        fig.suptitle('Marker Data Count Time Bin {} to {}'.format(time_bin[0],time_bin[1]),fontsize = 15)
+        
+        #### Set tick label size
+        ax.tick_params(labelsize = 8)
+        
+        #### Remove frame from legend
+        ax.legend().get_frame().set_visible(False)
+        
+        #### Set fig size
+        fig.set_figheight(7.5)
+        fig.set_figwidth(13)
+        
+        #### Set save path
+        save_path = "{}\\Data Count\\Time Bins".format(data_path)
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')
+        
+        #### Save fig
+        plt.savefig('{}//Marker Data Count Time Bin {} to {}.png'.format(save_path,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        ### Close fig
+        plt.close()
+        
+def OptimizeThresholds(optimal_thresholds):
+    """
+    Obtain optimized thresholds per time bin
     
+    Parameters
+    ---------------------------
+    optimal_thresholds - pd.DataFrame()
+        Data frame of optimized thresholds per parameter
+        
+    Returns
+    ---------------------------
+    optimized_thresholds - pd.DataFrame()
+        Optimized thresholds per time bin
+    """
     
+    #### Initialize results data frame
+    optimized_thresholds = pd.DataFrame(columns = optimal_thresholds.columns)
     
-    
-    
+    #### Iterate for all time bins
+    for time_bin in np.unique(optimal_thresholds.time_bin.values):
+        
+        #### Get data frame for current time bin
+        cur_df = optimal_thresholds[optimal_thresholds.time_bin == time_bin]
+        
+        #### Append to dataframe the parameter with maximum auc
+        optimized_thresholds = optimized_thresholds.append(cur_df[cur_df.auc == max(cur_df.auc.values)]).sort_index()
+        
+    return optimized_thresholds
     
     
     
