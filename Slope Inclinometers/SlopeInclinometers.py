@@ -20,7 +20,7 @@ from mpl_toolkits.axes_grid.inset_locator import inset_axes
 from matplotlib.legend_handler import HandlerLine2D
 from matplotlib import transforms
 #### Include Analysis folder of updews-pycodes (HARD CODED!!)
-path = os.path.abspath("C:\Users\Win8\Documents\Dynaslope\Data Analysis\updews-pycodes\Analysis")
+path = os.path.abspath("D:\Leo\Dynaslope\Data Analysis\updews-pycodes\Analysis")
 if not path in sys.path:
     sys.path.insert(1,path)
 del path 
@@ -56,7 +56,7 @@ plasma = cm.colors
 ### Use 30 days for colpos and disp analysis or 3 days for velocity analysis
 vel_event_window = pd.Timedelta(3,'D')
 event_window = pd.Timedelta(30,'D')
-colpos_interval_days = 4/24. ### in days
+colpos_interval_days = 1. ### in days
 colpos_interval_hours = colpos_interval_days*24 ### in hours
 window = 3 ### in days
 transparency = 0.5 ### Set transparency for colpos plots
@@ -268,7 +268,50 @@ def SubsurfaceValidEvents(vel = False):
     site_events['sensor_columns'] = None
     site_events['nodes'] = None
     return sensor_columns_to_plot(site_events).reset_index()[['timestamp','site','sensor_columns','nodes']]
+
+def SubsurfaceValidEvents2(vel = False):
+    '''
+    Gets all valid L2/L3 subsurface events from site_level_alert database while checking its validity from gsm ack
     
+    Parameters
+    ----------------------
+    None
+    
+    Optional Parameters
+    ----------------------
+    vel - boolean
+        specify if velocity event window will be used
+    
+    Returns
+    ----------------------
+        subsurface_valid_events - pd.DataFrame()
+            data frame of validated L2/L3 events with corresponding window specified by the window parameter
+    '''
+    #### Obtain from site level alerts all L2/L3 candidate triggers
+    query = "SELECT * FROM senslopedb.site_level_alert WHERE source = 'sensor' and alert != 'L0' and alert != 'ND' ORDER BY updateTS desc"
+    candidate_triggers = q.GetDBDataFrame(query)
+    
+    #### Filter invalid alerts
+    candidate_triggers = CheckIfEventIsValid(candidate_triggers)
+    
+    #### Set initial and final plotting timestamp depending on mode
+    if not(vel):
+        candidate_triggers['timestamp_start'] = map(lambda x:x - event_window,candidate_triggers['timestamp'])
+        candidate_triggers['timestamp_end'] = map(lambda x:x + event_window,candidate_triggers['updateTS'])
+    else:
+        candidate_triggers['timestamp_start'] = map(lambda x:x - vel_event_window - window,candidate_triggers['timestamp'])
+        candidate_triggers['timestamp_end'] = map(lambda x:x + vel_event_window,candidate_triggers['updateTS'])
+
+    
+    #### Remove overlaps and merge timestamps per site
+    candidate_triggers_group = candidate_triggers.groupby(['site'],as_index = False)
+    site_events = candidate_triggers_group.apply(site_events_to_plot)
+    
+    #### Determine columns to plot and nodes to check
+    site_events['sensor_columns'] = None
+    site_events['nodes'] = None
+    return sensor_columns_to_plot(site_events).reset_index()[['timestamp','site','sensor_columns','nodes']]
+
 def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False):
     #### Get all required parameters from realtime plotter
     col = q.GetSensorList(sensor_column)
@@ -545,7 +588,7 @@ def PlotALL(colposdf,sensor_name):
 
     
 def PlotALLIdentifiedEvents():
-    events_list = SubsurfaceValidEvents()[-2:]
+    events_list = SubsurfaceValidEvents2()[28:]
     for timestamp in events_list.timestamp.values:
         sensor_columns = events_list[events_list.timestamp == timestamp].sensor_columns.values[0].split(', ')
         for sensor in sensor_columns:
@@ -2293,7 +2336,7 @@ def AerialViewPlot(disp,name,nodes):
     plt.savefig('{}/Top View Corrected {} {} to {} {}.png'.format(save_path,name,pd.to_datetime(min(disp.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(disp.ts.values)).strftime("%Y-%m-%d_%H-%M"),'.'.join(map(lambda x:str(x),nodes))),
             dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
 
-def DoubleInterpolationPlot(disp,name,nodes,window,sigma=3):    
+def DoubleInterpolationPlot(disp,name,nodes,window,sigma=3,start_from = 1):    
     #### Select only relevant nodes
     mask = np.zeros(len(disp.id.values))
     for values in nodes:
@@ -2324,11 +2367,11 @@ def DoubleInterpolationPlot(disp,name,nodes,window,sigma=3):
     #### Set bounds of slice df according to window
     for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
 
-#        #### Resume run
-#        if fig_num <= 3240:
-#            print "Skipping frame {:04d}".format(fig_num)
-#            fig_num+=1
-#            continue
+        #### Start from specified frame
+        if fig_num < start_from:
+            print "Skipping frame {:04d}".format(fig_num)
+            fig_num+=1
+            continue
         
         ### Set end ts according to window        
         ts_end = ts_start + window
@@ -2801,7 +2844,7 @@ def DoubleInterpolationPlotVarSigma(disp,name,nodes,window):
         #### Increment figure number
         fig_num += 1    
 
-def DoubleInterpolationPlotWithDirection(disp,name,nodes,window,sigma = 'var'):    
+def DoubleInterpolationPlotWithDirection(disp,name,nodes,window,sigma = 'var',start_from = 1,end_at = None):    
     #### Select only relevant nodes
     mask = np.zeros(len(disp.id.values))
     for values in nodes:
@@ -2832,11 +2875,12 @@ def DoubleInterpolationPlotWithDirection(disp,name,nodes,window,sigma = 'var'):
     #### Set bounds of slice df according to window
     for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
 
-        #### Resume run
-        if fig_num <= 390:
+        #### Start from specified frame
+        if fig_num < start_from:
             print "Skipping frame {:04d}".format(fig_num)
             fig_num+=1
             continue
+
         
         ### Set end ts according to window        
         ts_end = ts_start + window
@@ -3091,6 +3135,12 @@ def DoubleInterpolationPlotWithDirection(disp,name,nodes,window,sigma = 'var'):
         
         #### Close figure
         plt.close()
+        
+        #### Stop loop if at the final specified frame
+        if end_at:
+            if fig_num >= end_at:
+                print "Stopping at frame {:04d}".format(fig_num)
+                break
         
         #### Increment figure number
         fig_num += 1    
