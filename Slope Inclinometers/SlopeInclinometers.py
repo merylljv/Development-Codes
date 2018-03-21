@@ -33,6 +33,8 @@ import genproc as gp
 from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
 from operator import is_not
 from functools import partial
+from PIL import Image
+
 
 
 #### Global Parameters
@@ -56,7 +58,7 @@ plasma = cm.colors
 ### Use 30 days for colpos and disp analysis or 3 days for velocity analysis
 vel_event_window = pd.Timedelta(3,'D')
 event_window = pd.Timedelta(30,'D')
-colpos_interval_days = 1. ### in days
+colpos_interval_days = 3. ### in days
 colpos_interval_hours = colpos_interval_days*24 ### in hours
 window = 3 ### in days
 transparency = 0.5 ### Set transparency for colpos plots
@@ -1134,7 +1136,7 @@ def PlotThresholdsForPaper(threshold_file,confidence = 0.95,interval = 'confiden
     v_range = max(threshold_df.velocity.values) - min(threshold_df.velocity.values)
     all_v = np.linspace(np.exp(np.log(min(threshold_df.velocity.values)) - np.log(v_range)*0.05),np.exp(np.log(max(threshold_df.velocity.values))+np.log(v_range)*0.05),10000)
     plot_num = 1
-    marker_type = ['s','^','+','x','d']    
+    marker_type = ['o','s','^','+','x','d']    
     h_map = {}
     #### Loop for all threshold type
     for threshold_type in reversed(np.unique(threshold_df.type.values)):
@@ -1157,7 +1159,7 @@ def PlotThresholdsForPaper(threshold_file,confidence = 0.95,interval = 'confiden
 #        a_threshold_lower = np.exp(np.log(a_threshold) - delta)
         
         #### Plot critical values
-        data, = ax.plot(v,a,'.',marker = marker_type[plot_num - 1],color = tableau20[(plot_num -1)*2],label = threshold_type.title()[3:] + ' Points')        
+        data, = ax.plot(v,a,'.',marker = marker_type[plot_num - 1],color = tableau20[(plot_num -1)*2],label = 'Event Data')        
         
         #### Set handler map
         h_map[data] = HandlerLine2D(numpoints = 1)
@@ -1206,7 +1208,7 @@ def PlotThresholdsForPaper(threshold_file,confidence = 0.95,interval = 'confiden
 #    fig.suptitle('Velocity vs. Acceleration Threshold Line for Subsurface Movement',fontsize = 15)
     
     #### Write anchored text of threshold type
-    threshold_type_at = AnchoredText("{}% {} Interval".format(round(confidence*100,2),interval.title()),prop=dict(size=10), frameon=False,loc = 3)        
+    threshold_type_at = AnchoredText("{}% {} Interval".format(round(confidence*100,2),interval.title()),prop=dict(size=10), frameon=False,loc = 4)        
     ax.add_artist(threshold_type_at)
     
     #### Set fig size borders and spacing
@@ -2871,7 +2873,7 @@ def DoubleInterpolationPlotWithDirection(disp,name,nodes,window,sigma = 'var',st
     
     #### Set figure number    
     fig_num = 1
-
+    
     #### Set bounds of slice df according to window
     for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
 
@@ -3305,4 +3307,755 @@ def PlotDVA(disp,name,nodes,window):
         #### Increment figure number
         fig_num += 1
         
+def PlotCumulativeDisplacementPlotAOGS(colposdf,sensor_column,zeroed = False,cmap = 'magma'):
+    #### Set figure and subplots
+    fig = plt.figure()
+    ax_xz = fig.add_subplot(111)
+#    ax_xy = fig.add_subplot(122,sharey = ax_xz)
+    
+    #### Ensure non repeating colors and color scheme = plasma
+    ax_xz=cp.nonrepeat_colors(ax_xz,len(set(colposdf.ts.values)),color=cmap)
+#    ax_xy=cp.nonrepeat_colors(ax_xy,len(set(colposdf.ts.values)),color='plasma')
+    
+    #### Set grid
+#    ax_xz.grid()
+#    ax_xy.grid()
+    
+    if zeroed == True:
+        colposdf_id = colposdf.groupby('id',as_index = False)
+        colposdf = colposdf_id.apply(set_zero_disp)
+        zeroed = 'zeroed '
+    else:
+        zeroed = ''
         
+    #### Compute for cumulative displacement
+    colposdf_ts = colposdf.groupby('ts',as_index = False)
+    colposdf = colposdf_ts.apply(compute_cumdisp)
+    
+    for ts in np.unique(colposdf.ts.values):
+        #### Get df for a specific timestamp
+        ts = pd.to_datetime(ts)
+        cur_df = colposdf[colposdf.ts == ts]
+        
+        #### Obtain values to plot
+        cur_depth = cur_df['depth'].values
+        cur_xz = cur_df['cum_xz'].values * 1000
+#        cur_xy = cur_df['cum_xy'].values * 1000
+        
+        #### Plot values write label to xz plot only
+        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 10,markersize = 32,label = ts.strftime("%d %b '%y %H:%M"),alpha = transparency)
+#        ax_xy.plot(cur_xy,cur_depth,'.-',lw = 1.25,markersize = 10,alpha = transparency)
+        
+        
+#        #### Contain all plots in 'plots' variable
+#        try:
+#            plots = plots + cur_plot
+#        except:
+#            plots = cur_plot
+    
+    #### Set fontsize and rotate ticks for x axis
+    for tick in ax_xz.xaxis.get_minor_ticks():
+        tick.label.set_rotation('vertical')
+        tick.label.set_fontsize(10)
+        
+#    for tick in ax_xy.xaxis.get_minor_ticks():
+        tick.label.set_rotation('vertical')
+        tick.label.set_fontsize(10)
+   
+    for tick in ax_xz.xaxis.get_major_ticks():
+        tick.label.set_rotation('vertical')
+        tick.label.set_fontsize(10)
+        
+#    for tick in ax_xy.xaxis.get_major_ticks():
+        tick.label.set_rotation('vertical')
+        tick.label.set_fontsize(10)
+    
+    #### Remove spines
+    ax_xz.spines["top"].set_visible(False)    
+    ax_xz.spines["bottom"].set_visible(False)    
+    ax_xz.spines["right"].set_visible(False)    
+    ax_xz.spines["left"].set_visible(False)     
+        
+    #### Plot the legends and labels
+#    labels = [l.get_label() for l in plots]
+#    fig.legend(plots,labels,loc = 'center right',fontsize = 12)
+#    if zeroed == 'zeroed ':
+#        fig.suptitle("Cumulative Deflection Plot for {} (zeroed)".format(sensor_column.upper()),fontsize = 15)
+#    else:
+#        fig.suptitle("Cumulative Deflection Plot for {}".format(sensor_column.upper()),fontsize = 15)
+        
+#    ax_xz.set_ylabel('Depth (meters)',fontsize = 14)
+#    ax_xz.set_xlabel('Cumulative Deflection (mm)\ndownslope direction',fontsize = 14)
+#    ax_xy.set_xlabel('Cumulative Deflection (mm)\nacross slope direction',fontsize = 14)
+    
+    #### Set xlim and ylim
+    depth_range = abs(max(colposdf.depth.values) - min(colposdf.depth.values))
+    cum_xz_range = abs(max(colposdf.cum_xz.values)- min(colposdf.cum_xz.values))
+    cum_xy_range = abs(max(colposdf.cum_xy.values)- min(colposdf.cum_xy.values))
+    
+    ax_xz.set_ylim([min(colposdf.depth.values)-0.05*depth_range,max(colposdf.depth.values)+0.05*depth_range])
+    
+    #### Set automatic adjustement of x-axis limits
+    if cum_xz_range > cum_xy_range:
+        total_range = cum_xz_range*1.1
+        ax_xz.set_xlim(np.array([min(colposdf.cum_xz.values)-0.05*cum_xz_range,max(colposdf.cum_xz.values)+0.05*cum_xz_range])*1000)
+        
+#        cum_xy_center = 0.5*(max(colposdf.cum_xy.values) + min(colposdf.cum_xy.values))
+#        ax_xy.set_xlim(np.array([cum_xy_center-total_range*0.5,cum_xy_center + total_range * 0.5])*1000)
+    else:
+        total_range = cum_xy_range*1.1
+#        ax_xy.set_xlim(np.array([min(colposdf.cum_xy.values)-0.05*cum_xy_range,max(colposdf.cum_xy.values)+0.05*cum_xy_range])*1000)
+        
+        cum_xz_center = 0.5*(max(colposdf.cum_xz.values) + min(colposdf.cum_xz.values))
+        ax_xz.set_xlim(np.array([cum_xz_center-total_range*0.5,cum_xz_center + total_range * 0.5])*1000)
+    
+
+    #### Remove ticks
+    ax_xz.tick_params(axis="both", which="both", bottom="on", top="off",labelbottom="on", left="off", right="off", labelleft="off",labelright = 'off')      
+    
+    #### Set y ticks
+    ticks = ax_xz.get_yticks()
+    ax_xz.set_yticklabels([int(abs(tick)) for tick in ticks])
+    
+    #### Set fig size, borders and spacing
+    fig.set_figheight(18)
+    fig.set_figwidth(8)
+    fig.subplots_adjust(right = 0.795,top = 0.925,left = 0.100)
+    
+    #### Set save path
+    save_path = "{}/{}/Event {} to {}/ColPos".format(data_path,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%d %b %y"),pd.to_datetime(max(colposdf.ts.values)).strftime("%d %b %y"))
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+    
+    #### Save figure
+    plt.savefig('{}/CumDef {}{} {} to {} {} AOGS.png'.format(save_path,zeroed,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),cmap),
+            dpi=520,orientation='landscape',mode='w')
+    
+    print '{}/CumDef {}{} {} to {} AOGS.png'.format(save_path,zeroed,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"))
+    
+    #### Set white to transparent
+    img = Image.open('{}/CumDef {}{} {} to {} {} AOGS.png'.format(save_path,zeroed,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),cmap))
+    img = img.convert("RGBA")
+    datas = img.getdata()
+    
+    newData = []
+    for item in datas:
+        if item[0] == 255 and item[1] == 255 and item[2] == 255:
+            newData.append((255, 255, 255, 0))
+        else:
+            newData.append(item)
+    
+    img.putdata(newData)
+    img.save('{}/CumDef {}{} {} to {} {} AOGS Transparent.png'.format(save_path,zeroed,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),cmap), "PNG")
+
+def PlotIncrementalDisplacementAOGS(colposdf,sensor_column,zeroed = False,zoomin=False):
+    #### Set figure and subplots
+    fig = plt.figure()
+    ax_xz = fig.add_subplot(111)
+#    ax_xy = fig.add_subplot(122, sharey = ax_xz)
+    
+    #### Ensure non repeating colors and color scheme = plasma
+    ax_xz=cp.nonrepeat_colors(ax_xz,len(set(colposdf.ts.values)),color='inferno')
+#    ax_xy=cp.nonrepeat_colors(ax_xy,len(set(colposdf.ts.values)),color='plasma')
+    
+    #### Set grid
+#    ax_xz.grid()
+#    ax_xy.grid()
+    
+    if zeroed == True:
+        colposdf_id = colposdf.groupby('id',as_index = False)
+        colposdf = colposdf_id.apply(set_zero_disp)
+        zeroed = 'zeroed '
+    else:
+        zeroed = ''
+    
+    for ts in np.unique(colposdf.ts.values):
+        #### Get df for a specific timestamp
+        ts = pd.to_datetime(ts)
+        cur_df = colposdf[colposdf.ts == ts]
+        
+        #### Obtain values to plot
+        cur_depth = cur_df['depth'].values
+        cur_xz = cur_df['xz'].values * 1000
+#        cur_xy = cur_df['xy'].values * 1000
+        
+        #### Plot values write label to xz plot only
+        cur_plot = ax_xz.plot(cur_xz,cur_depth,'.-',lw = 10,markersize = 32,label = ts.strftime("%d %b '%y %H:%M"),alpha = transparency)
+#        ax_xy.plot(cur_xy,cur_depth,'.-',lw = 1.25,markersize = 10)
+        
+        
+        #### Contain all plots in 'plots' variable
+        try:
+            plots = plots + cur_plot
+        except:
+            plots = cur_plot
+    
+#    #### Set fontsize and rotate ticks for x axis
+#    for tick in ax_xz.xaxis.get_minor_ticks():
+#        tick.label.set_rotation('vertical')
+#        tick.label.set_fontsize(10)
+        
+#    for tick in ax_xy.xaxis.get_minor_ticks():
+#        tick.label.set_rotation('vertical')
+#        tick.label.set_fontsize(10)
+#   
+#    for tick in ax_xz.xaxis.get_major_ticks():
+#        tick.label.set_rotation('vertical')
+#        tick.label.set_fontsize(10)
+#        
+#    for tick in ax_xy.xaxis.get_major_ticks():
+#        tick.label.set_rotation('vertical')
+#        tick.label.set_fontsize(10)
+    
+    #### Plot the legends and labels
+#    labels = [l.get_label() for l in plots]
+#    fig.legend(plots,labels,loc = 'center right',fontsize = 12)
+#    if zeroed == 'zeroed ':
+#        fig.suptitle("Incremental Displacement Plot for {} (zeroed)".format(sensor_column.upper()),fontsize = 15)
+#    else:
+#        fig.suptitle("Incremental Displacement Plot for {}".format(sensor_column.upper()),fontsize = 15)
+        
+#    ax_xz.set_ylabel('Depth (meters)',fontsize = 14)
+#    ax_xz.set_xlabel('Displacement (mm)\ndownslope direction',fontsize = 14)
+##    ax_xy.set_xlabel('Displacement (mm)\nacross slope direction',fontsize = 14)
+    
+    #### Set xlim and ylim
+    depth_range = abs(max(colposdf.depth.values) - min(colposdf.depth.values))
+    xz_range = abs(max(colposdf.xz.values)- min(colposdf.xz.values))
+    xy_range = abs(max(colposdf.xy.values)- min(colposdf.xy.values))
+    
+    ax_xz.set_ylim([min(colposdf.depth.values)-0.05*depth_range,max(colposdf.depth.values)+0.05*depth_range])
+    
+    if zoomin:
+        ax_xz.set_xlim(np.array([min(colposdf.xz.values)-0.05*xz_range,max(colposdf.xz.values)+0.05*xz_range])*1000)
+#        ax_xy.set_xlim(np.array([min(colposdf.xy.values)-0.05*xy_range,max(colposdf.xy.values)+0.05*xy_range])*1000)
+        zoomin = 'zoomin '
+    else:
+    #### Set automatic adjustement of x-axis limits
+        if xz_range > xy_range:
+            total_range = xz_range*1.1
+            ax_xz.set_xlim(np.array([min(colposdf.xz.values)-0.05*xz_range,max(colposdf.xz.values)+0.05*xz_range])*1000)
+            
+#            xy_center = 0.5*(max(colposdf.xy.values) + min(colposdf.xy.values))
+#            ax_xy.set_xlim(np.array([xy_center-total_range*0.5,xy_center + total_range * 0.5])*1000)
+        else:
+            total_range = xy_range*1.1
+#            ax_xy.set_xlim(np.array([min(colposdf.xy.values)-0.05*xy_range,max(colposdf.xy.values)+0.05*xy_range])*1000)
+            
+            xz_center = 0.5*(max(colposdf.xz.values) + min(colposdf.xz.values))
+            ax_xz.set_xlim(np.array([xz_center-total_range*0.5,xz_center + total_range * 0.5])*1000)
+        zoomin = ''
+    
+    #### Remove spines
+    ax_xz.spines["top"].set_visible(False)    
+    ax_xz.spines["bottom"].set_visible(False)    
+    ax_xz.spines["right"].set_visible(False)    
+    ax_xz.spines["left"].set_visible(False)   
+    
+    #### Remove ticks
+    ax_xz.tick_params(axis="both", which="both", bottom="on", top="off",labelbottom="on", left="off", right="off", labelleft="off",labelright = 'off')      
+
+    
+    #### Set fig size, borders and spacing
+    fig.set_figheight(18)
+    fig.set_figwidth(8)
+    fig.subplots_adjust(right = 0.795,top = 0.925,left = 0.100)
+    
+    #### Set save path
+    save_path = "{}/{}/Event {} to {}/IncDisp".format(data_path,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%d %b %y"),pd.to_datetime(max(colposdf.ts.values)).strftime("%d %b %y"))
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+    
+    #### Save figure
+    plt.savefig('{}/IncDisp {}{}{} {} to {} AOGS.png'.format(save_path,zeroed,zoomin,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M")),
+            dpi=520, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    #### Set white to transparent
+    img = Image.open('{}/IncDisp {}{}{} {} to {} AOGS.png'.format(save_path,zeroed,zoomin,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M")))
+    img = img.convert("RGBA")
+    datas = img.getdata()
+    
+    newData = []
+    for item in datas:
+        if item[0] == 255 and item[1] == 255 and item[2] == 255:
+            newData.append((255, 255, 255, 0))
+        else:
+            newData.append(item)
+    
+    img.putdata(newData)
+    img.save('{}/IncDisp {}{}{} {} to {} AOGS Transparent.png'.format(save_path,zeroed,zoomin,sensor_column,pd.to_datetime(min(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M"),pd.to_datetime(max(colposdf.ts.values)).strftime("%Y-%m-%d_%H-%M")), "PNG")
+
+def DoubleInterpolationPlotWithDirectionAOGS(disp,name,nodes,window,sigma = 'var',start_from = 1,end_at = None):    
+    #### Select only relevant nodes
+    mask = np.zeros(len(disp.id.values))
+    for values in nodes:
+        mask = np.logical_or(mask,disp.id.values == values)
+    disp = disp[mask]
+    
+    #### Set initial displacements to zero
+    disp_id = disp.groupby('id',as_index = False)
+    disp = disp_id.apply(set_zero_disp)      
+    
+    #### Compute Shear Displacements 
+    disp_ts = disp.groupby('ts',as_index = True)
+    cumsheardf = disp_ts.apply(ComputeCumShear).reset_index(drop = True).set_index('ts')
+
+    #### Compute for time delta values
+    cumsheardf['time'] = map(lambda x: x / np.timedelta64(1,'D'),cumsheardf.index - cumsheardf.index[0])
+    
+    #### Convert displacement to centimeters
+    cumsheardf['cum_xy'] = cumsheardf.cum_xy.apply(lambda x:x*100)
+    cumsheardf['cum_xz'] = cumsheardf.cum_xz.apply(lambda x:x*100)
+    
+    #### Get last timestamp in df
+    last_ts = cumsheardf.index[-1]        
+    
+    #### Set figure number    
+    fig_num = 1
+    
+    #### Set bounds of slice df according to window
+    for ts_start in cumsheardf[cumsheardf.index <= last_ts - window].index:
+
+        #### Start from specified frame
+        if fig_num < start_from:
+            print "Skipping frame {:04d}".format(fig_num)
+            fig_num+=1
+            continue
+
+        
+        ### Set end ts according to window        
+        ts_end = ts_start + window
+        
+        #### Slice df
+        slicedf = cumsheardf[ts_start:ts_end]
+        
+        #### Get time and displacement values
+        time_delta = slicedf.time.values
+        xy_disp = slicedf.cum_xy.values
+        xz_disp = slicedf.cum_xz.values
+        
+        #### Compute slope and intercept of average direction
+        slope = (xy_disp[-1]-xy_disp[0])/(xz_disp[-1]-xz_disp[0])
+        intercept = xy_disp[0] - slope*xz_disp[0]
+    
+        #### Compute average displacement angle
+        angle = np.rad2deg(np.arctan2((xy_disp[-1]-xy_disp[0]),(xz_disp[-1]-xz_disp[0])))
+        
+        #### Generate average line values
+        ave_line_xz = np.linspace(xz_disp[0],xz_disp[-1],10000)    
+        ave_line_xy = slope*ave_line_xz + intercept
+        
+        #### Get average velocity
+        ave_disp = np.sqrt((xy_disp[-1]-xy_disp[0])**2 + (xz_disp[-1] - xz_disp[0])**2)
+        ave_velocity = ave_disp/(time_delta[-1] - time_delta[0])
+        
+        #### Choose standard deviation based on settings
+        if sigma == 'var':
+            sigma_xy = np.sqrt(np.sum(np.power(xy_disp - np.average(xy_disp),2))/float(len(xy_disp)-1))        
+            sigma_xz = np.sqrt(np.sum(np.power(xz_disp - np.average(xz_disp),2))/float(len(xz_disp)-1))        
+        elif sigma == '1.5var':
+            sigma_xy = 1.5*np.sqrt(np.sum(np.power(xy_disp - np.average(xy_disp),2))/float(len(xy_disp)-1))        
+            sigma_xz = 1.5*np.sqrt(np.sum(np.power(xz_disp - np.average(xz_disp),2))/float(len(xz_disp)-1))        
+        elif sigma == '3var':
+            sigma_xy = 3*np.sqrt(np.sum(np.power(xy_disp - np.average(xy_disp),2))/float(len(xy_disp)-1))        
+            sigma_xz = 3*np.sqrt(np.sum(np.power(xz_disp - np.average(xz_disp),2))/float(len(xz_disp)-1))        
+        else:
+            sigma_xy = sigma
+            sigma_xz = sigma
+        
+        print "Frame number {}".format(fig_num)
+        print "Sigma XY = {}".format(sigma_xy)
+        print "Sigma XZ = {}".format(sigma_xz)        
+        
+        #### Commence interpolation
+        try:
+            print "Commencing interpolation"
+            #### Take the gaussian average of data points and its variance
+            _,var_xy = moving_average(xy_disp,sigma_xy)
+            _,var_xz = moving_average(xz_disp,sigma_xz)
+            sp_xy = UnivariateSpline(time_delta,xy_disp,w=1/np.sqrt(var_xy))
+            sp_xz = UnivariateSpline(time_delta,xz_disp,w=1/np.sqrt(var_xz))
+            
+            #### Use 10000 points for interpolation
+            time_int = np.linspace(time_delta[0],time_delta[-1],10000)
+            
+            #### Spline interpolation values    
+            int_disp_xy = sp_xy(time_int)
+            int_disp_xz = sp_xz(time_int)
+            
+            int_vel_xy = sp_xy.derivative(n=1)(time_int)
+            int_vel_xz = sp_xz.derivative(n=1)(time_int)
+            
+            int_acc_xy = sp_xy.derivative(n=2)(time_int)
+            int_acc_xz = sp_xz.derivative(n=2)(time_int)
+            
+            #### Compute for goodness of fit values
+            SS_res_xy, r2_xy, RMSE_xy = GoodnessOfSplineFit(time_delta,xy_disp,sp_xy)            
+            SS_res_xz, r2_xz, RMSE_xz = GoodnessOfSplineFit(time_delta,xz_disp,sp_xz)            
+        
+            print "Interpolation Complete"
+        except:
+            print "Interpolation Error {}".format(pd.to_datetime(slicedf.index[-1]).strftime("%m/%d/%Y %H:%M"))
+            #### Use 10000 points for interpolation
+            time_int = np.linspace(time_delta[0],time_delta[-1],10000)
+            int_disp_xy = np.ones(len(time_int))*np.nan
+            int_disp_xz = np.ones(len(time_int))*np.nan
+            int_vel_xy = np.ones(len(time_int))*np.nan
+            int_vel_xz = np.ones(len(time_int))*np.nan
+            int_acc_xy = np.ones(len(time_int))*np.nan
+            int_acc_xz = np.ones(len(time_int))*np.nan
+            SS_res_xy,r2_xy,RMSE_xy = np.nan,np.nan,np.nan
+            SS_res_xz,r2_xz,RMSE_xz = np.nan,np.nan,np.nan
+        
+        #### Compute for resultant acceleration and velocity and direction of final values        
+        res_vel = np.sqrt(int_vel_xy[-1]**2 + int_vel_xz[-1]**2)        
+        res_acc = np.sqrt(int_acc_xy[-1]**2 + int_acc_xz[-1]**2)
+        
+        res_vel_angle = np.arctan2(int_vel_xy[-1],int_vel_xz[-1])
+        res_acc_angle = np.arctan2(int_acc_xy[-1],int_acc_xz[-1])
+        
+        #### Commence plotting
+
+        #### Initialize figure parameters
+        fig = plt.figure()
+#        int_xz_ax = fig.add_subplot(221)
+#        int_xy_ax = fig.add_subplot(223,sharex = int_xz_ax)
+        top_ax = fig.add_subplot(111)
+        
+        #### Plot Grid
+#        int_xz_ax.grid()
+#        int_xy_ax.grid()
+#        top_ax.grid()
+        
+        #### Compute corresponding datetime array
+        datetime_array = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_delta)        
+        datetime_int = map(lambda x:cumsheardf.index[0] + x*pd.Timedelta(1,'D'),time_int)
+        
+        #### Plot computed values
+        
+        ### Plot data and interpolated values
+#        int_xy_ax.plot(time_int,int_disp_xy,'-',color = tableau20[12],label = 'Interpolation')
+#        int_xy_ax.plot(time_delta,xy_disp,'.',color = tableau20[0],label = 'Data')
+
+#        int_xz_ax.plot(time_int,int_disp_xz,'-',color = tableau20[12],label = 'Interpolation')        
+#        int_xz_ax.plot(time_delta,xz_disp,'.',color = tableau20[0],label = 'Data')
+        
+        #### Remove spines
+#        for ax_xz in [int_xy_ax,int_xz_ax]:
+#            ax_xz.spines["top"].set_visible(False)    
+#            ax_xz.spines["left"].set_visible(False)   
+#            ax_xz.tick_params(axis="both", which="both", bottom="on", top="off",labelbottom="on", left="off", right="on", labelleft="off",labelright = 'on')      
+        
+        ### Create inset axes for displacement vs time plots
+#        inset_xy_ax = inset_axes(int_xy_ax,width = "20%",height = "20%",loc = 3)
+#        inset_xz_ax = inset_axes(int_xz_ax,width = "20%",height = "20%",loc = 3)
+        
+        ### Create inset axes for top view plot
+        ## Get position of top ax plot
+#        top_ax_pos = top_ax.get_position()
+#        
+#        ## Generate inset axes
+#        inset_top_ax = fig.add_axes([top_ax_pos.x0 + 0.04,top_ax_pos.y0 - 0.005,top_ax_pos.width*0.3,top_ax_pos.height*0.3/1.3],polar = True)
+#        
+#        ## Customize tick parameters
+#        inset_top_ax.tick_params(labelleft = 'off')
+#        inset_top_ax.yaxis.grid(False)
+#        
+#        ## Customize theta labels
+#        theta_ticks = np.arange(0,360,45)
+#        inset_top_ax.set_thetagrids(theta_ticks,frac = 1.25,fontsize = 10)
+#        
+#        ### Plot directions to top axes inset
+#        if np.round(res_vel,2) != 0:
+#            inset_top_ax.arrow(res_vel_angle,0,0,1,length_includes_head = True,color = tableau20[4],width = 0.015,head_length = 0.25*0.75,head_width = 0.25*0.70*0.75)
+#        if np.round(res_acc,2) != 0:
+#            inset_top_ax.arrow(res_acc_angle,0,0,0.75,length_includes_head = True,color = tableau20[16],width = 0.015, head_length = 0.25 * 0.75,head_width = 0.25*0.70*0.90)
+#        inset_top_ax.plot(np.deg2rad(angle)*np.ones(10000),np.linspace(0,1,10000),'--',lw = 1.25, color = tableau20[8])
+#        inset_top_ax.plot(np.deg2rad(angle)*np.ones(10000)+np.pi,np.linspace(0,1,10000),'--',lw = 1.25, color = tableau20[8])
+        
+        ### Plot current range to the inset axes
+#        inset_xy_ax.plot(cumsheardf.index,cumsheardf.cum_xy.values)
+#        inset_xy_ax.axvspan(ts_start,ts_end,facecolor = tableau20[2],alpha = 0.5)
+#        
+#        inset_xz_ax.plot(cumsheardf.index,cumsheardf.cum_xz.values)
+#        inset_xz_ax.axvspan(ts_start,ts_end,facecolor = tableau20[2],alpha = 0.5)
+#        
+        ### Hide x tick labels for xz plot
+#        int_xz_ax.tick_params(labelbottom = 'off')
+#        
+#        ### Hide ticks and labels for inset plot
+#        inset_xy_ax.tick_params(top = 'off',left = 'off',bottom = 'off',right = 'off',labelleft = 'off',labelbottom = 'off')        
+#        inset_xz_ax.tick_params(top = 'off',left = 'off',bottom = 'off',right = 'off',labelleft = 'off',labelbottom = 'off')        
+#        
+#        ### Set transparency for inset plot
+#        inset_xy_ax.patch.set_alpha(0.5)        
+#        inset_xz_ax.patch.set_alpha(0.5)                
+        
+        ### Plot aerial view
+        ## Different color for first point
+        interpolation, = top_ax.plot(int_disp_xz,int_disp_xy,'-',color =np.array((234,182,79))/255.,lw = 3, label = 'Interpolation')
+        succeding_data, = top_ax.plot(xz_disp,xy_disp,'.',color = np.array((248,153,29))/255.,markersize = 15,label = 'Data')
+
+        ## Plot average direction
+#        average, = top_ax.plot(ave_line_xz,ave_line_xy,'--',color = tableau20[8],lw = 1.25,label = 'Average')        
+        
+        #### Set datetime format for x axis
+#        int_xy_ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+#        int_xz_ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+        
+        #### Set ylim for displacement plots
+        disp_xy_max = max(np.concatenate((xy_disp,int_disp_xy)))
+        disp_xy_min = min(np.concatenate((xy_disp,int_disp_xy)))
+#        disp_xy_range = abs(disp_xy_max - disp_xy_min)
+
+        disp_xz_max = max(np.concatenate((xz_disp,int_disp_xz)))
+        disp_xz_min = min(np.concatenate((xz_disp,int_disp_xz)))
+#        disp_xz_range = abs(disp_xz_max - disp_xz_min)
+        
+#        int_xy_ax.set_ylim(disp_xy_min - disp_xy_range*0.05,disp_xy_max + disp_xy_range *0.05)
+#        int_xz_ax.set_ylim(disp_xz_min - disp_xz_range*0.05,disp_xz_max + disp_xz_range *0.05)
+#        
+        #### Set xlim and ylim for aerial view plot        
+        #### Determine range for xlim and ylim
+        xz_range = max(xz_disp) - min(xz_disp)
+        xy_range = max(xy_disp) - min(xy_disp)
+        max_range = 1.10*max([xz_range,xy_range])
+        xz_mid = 0.5*(max(xz_disp) + min(xz_disp))
+        xy_mid = 0.5*(max(xy_disp) + min(xy_disp))
+        
+        #### Set xlim and ylim according to ranges (h = 1.3 w)
+        top_ax.set_xlim([xz_mid-0.45*max_range,xz_mid+0.45*max_range])
+        top_ax.set_ylim([-3.25,-1.60])  
+        
+        #### Incorporate Anchored Texts
+#        int_xy_at = AnchoredText("SSR = {}\n$r^2$ = {}\n RMSE = {}".format(np.round(SS_res_xy,4),np.round(r2_xy,4),np.round(RMSE_xy,4)),prop=dict(size=10), frameon=True,loc = 4)
+#        int_xz_at = AnchoredText("SSR = {}\n$r^2$ = {}\n RMSE = {}".format(np.round(SS_res_xz,4),np.round(r2_xz,4),np.round(RMSE_xz,4)),prop=dict(size=10), frameon=True,loc = 4)
+#        ave_vel_at = AnchoredText("v = {}\na = {}\nAverage Velocity \n{} cm/day, {}$^\circ$".format(np.round(res_vel,2),np.round(res_acc,2),np.round(ave_velocity,2),np.round(angle,2)),prop=dict(size=12), frameon=False,loc = 4)
+#        
+#        int_xy_at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+#        int_xz_at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+#        
+#        int_xy_at.patch.set_alpha(0.5)
+#        int_xz_at.patch.set_alpha(0.5)
+#        
+#        int_xy_ax.add_artist(int_xy_at)
+#        int_xz_ax.add_artist(int_xz_at)
+#        top_ax.add_artist(ave_vel_at)
+
+        #### Remove spines
+        top_ax.spines["top"].set_visible(False)     
+        top_ax.spines["right"].set_visible(False)    
+        
+        plt.setp(top_ax.spines.values(), color=np.array((248,153,29))/255.)
+        plt.setp([top_ax.get_xticklines(), top_ax.get_yticklines()], color=np.array((248,153,29))/255.)
+        top_ax.xaxis.label.set_color(np.array((248,153,29))/255.)
+        top_ax.yaxis.label.set_color(np.array((248,153,29))/255.)
+        
+        top_ax.spines['left'].set_linewidth(3)
+        top_ax.spines['bottom'].set_linewidth(3)
+        
+        #### Set tick width
+        top_ax.tick_params(width = 2,length = 5)
+        
+        
+        #### Incorporate frame number in the figure
+        plt.figtext(1-0.005,0.005,str(fig_num),ha = 'right',va='bottom',fontsize = 8)
+        
+        #### Plot legend for interpolation graph
+#        int_xy_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12)
+#        int_xz_ax.legend(loc = 'upper left',fancybox = True, framealpha = 0.5,fontsize = 12)
+#    
+#        top_legend = top_ax.legend([succeding_data,interpolation,average],(l.get_label() for l in [succeding_data,interpolation,average]),loc = 'upper center', bbox_to_anchor = (0.5,1.05),ncol = 3,fontsize = 12)        
+#        top_legend.get_frame().set_visible(False)
+#        #### Set fig title
+#        fig.suptitle('Interpolation Plot for Site {} Sensor {}'.format(name[:3].upper(),name.upper()),fontsize = 15)        
+        
+        #### Set axis labels
+#        int_xy_ax.set_ylabel('xy displacement (cm)',fontsize = 14)
+#        int_xz_ax.set_ylabel('xz displacement (cm)',fontsize = 14)
+#        int_xy_ax.set_xlabel('Days',fontsize = 14)
+        
+#        top_ax.set_ylabel('xy displacement (cm)',fontsize = 14)
+#        top_ax.set_xlabel('xz displacement (cm)',fontsize = 14)
+#                
+        #### Set fig size borders and spacing
+        fig.set_figheight(7)
+        fig.set_figwidth(10)
+        fig.subplots_adjust(right = 0.96,top = 0.94,left = 0.075,bottom = 0.05,hspace = 0.10, wspace = 0.18)
+        
+        #### Set aspect ratio of aerial view as equal
+#        top_ax.set_aspect('equal','box')
+        
+        #### Set save path
+        save_path = "{}/{}/Event {} to {} AOGS/Double Interpolation With Direction Sigma {}".format(data_path,name,cumsheardf.index[0].strftime("%d %b %y"),last_ts.strftime("%d %b %y"),sigma)
+        if not os.path.exists(save_path+'/'):
+            os.makedirs(save_path+'/')    
+        
+        #### Save figure
+        plt.savefig('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num),
+                dpi=520, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+        
+        #### Set white to transparent
+        img = Image.open('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num))
+        img = img.convert("RGBA")
+        datas = img.getdata()
+        
+        newData = []
+        for item in datas:
+            if item[0] == 255 and item[1] == 255 and item[2] == 255:
+                newData.append((255, 255, 255, 0))
+            else:
+                newData.append(item)
+        
+        img.putdata(newData)
+        img.save('{}/node{}.{:04d}.png'.format(save_path,str(nodes[0])+'to'+str(nodes[-1]),fig_num), "PNG")
+
+        
+        #### Close figure
+        plt.close()
+        
+        #### Stop loop if at the final specified frame
+        if end_at:
+            if fig_num >= end_at:
+                print "Stopping at frame {:04d}".format(fig_num)
+                break
+        
+        #### Increment figure number
+        fig_num += 1    
+        
+        
+
+def PlotThresholdsForPaperAOGS(threshold_file,confidence = 0.95,interval = 'confidence'):
+    #### Obtain data frame from file
+    threshold_df = pd.read_csv(threshold_file,index_col = 0)         
+
+    #### Initialize figure parameters
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+#    ax.grid()    
+    v_range = max(threshold_df.velocity.values) - min(threshold_df.velocity.values)
+    all_v = np.linspace(np.exp(np.log(min(threshold_df.velocity.values)) - np.log(v_range)*0.05),np.exp(np.log(max(threshold_df.velocity.values))+np.log(v_range)*0.05),10000)
+    plot_num = 1
+    marker_type = ['o','s','^','+','x','d']    
+    h_map = {}
+    #### Loop for all threshold type
+    for threshold_type in reversed(np.unique(threshold_df.type.values)):
+        
+        #### Obtain critical values        
+        v = threshold_df[threshold_df.type == threshold_type].velocity.values
+        a = threshold_df[threshold_df.type == threshold_type].acceleration.values         
+        
+        #### Obtain the logarithm of the critical values
+#        log_v = np.log(v)
+#        log_a = np.log(a)
+#        
+#        #### Compute the parameters of linear regression and confidence interval
+#        slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
+#        delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval)
+#        
+#        #### Compute the threshold line and confidence interval values
+#        a_threshold = np.exp(slope*np.log(all_v) + intercept)
+#        a_threshold_upper = np.exp(np.log(a_threshold) + delta)
+#        a_threshold_lower = np.exp(np.log(a_threshold) - delta)
+        
+        #### Plot critical values
+        data, = ax.plot(v,a,'.',marker = marker_type[plot_num - 1],color = tableau20[(plot_num -1)*2],label = ' ')        
+        
+        #### Set handler map
+        h_map[data] = HandlerLine2D(numpoints = 1)
+        #### Plot all computed values
+#        ax.plot(all_v,a_threshold,'-',color = tableau20[(plot_num -1)*2],label = threshold_type.title(),lw=1.5)
+#        ax.plot(all_v,a_threshold_upper,'--',color = tableau20[(plot_num -1)*2])
+#        ax.plot(all_v,a_threshold_lower,'--',color = tableau20[(plot_num - 1)*2])
+        
+        ### Plot threshold envelope
+#        ax.fill_between(all_v,a_threshold_lower,a_threshold_upper,color = tableau20[(plot_num - 1)*2],alpha = 0.2)
+        
+        #### Increment plot number        
+        plot_num += 1
+        
+    #### Compute parameters of linear regression for all values
+    v = threshold_df.velocity.values
+    a = threshold_df.acceleration.values
+    log_v = np.log(v)
+    log_a = np.log(a)
+    slope, intercept, r_value, p_value, std_err = stats.linregress(log_v,log_a)
+    delta = uncertainty(log_v,log_a,slope,intercept,confidence,np.log(all_v),interval)
+    a_threshold = np.exp(slope*np.log(all_v) + intercept)
+    a_threshold_upper = np.exp(np.log(a_threshold) + delta)
+    a_threshold_lower = np.exp(np.log(a_threshold) - delta)
+    ax.plot(all_v,a_threshold,'-',color = tableau20[(plot_num -1)*2],label = ' ',lw=1.5)
+    ax.plot(all_v,a_threshold_upper,'--',color = tableau20[(plot_num -1)*2])
+    ax.plot(all_v,a_threshold_lower,'--',color = tableau20[(plot_num - 1)*2])
+    ax.fill_between(all_v,a_threshold_lower,a_threshold_upper,color = tableau20[(plot_num - 1)*2],alpha = 0.2)
+        
+    #### Set x and y labels and scales
+    ax.set_xscale('log')        
+    ax.set_yscale('log')
+    ax.set_xlabel('Velocity (cm/day)',fontsize = 14)
+    ax.set_ylabel('Acceleration(cm/day$^2$)',fontsize = 14)
+ 
+    #### Set xlim and ylim
+    v_max = max(all_v)
+    v_min = min(all_v)
+    a_max = max(a_threshold_upper)
+    a_min = min(a_threshold_lower)
+    ax.set_xlim(v_min,v_max)
+    ax.set_ylim(a_min,a_max)
+   
+    #### Plot labels and figure title
+    legend = ax.legend(loc = 'upper left', fancybox = True, framealpha = 0.5,handler_map = h_map)
+    legend.get_frame().set_visible(False )
+#    fig.suptitle('Velocity vs. Acceleration Threshold Line for Subsurface Movement',fontsize = 15)
+    
+
+    #### Remove spines
+    ax.spines["top"].set_visible(False)     
+    ax.spines["right"].set_visible(False)    
+    
+    plt.setp(ax.spines.values(), color=np.array((248,153,29))/255.)
+    plt.setp([ax.get_xticklines(), ax.get_yticklines()], color=np.array((248,153,29))/255.)
+    ax.xaxis.label.set_color(np.array((248,153,29))/255.)
+    ax.yaxis.label.set_color(np.array((248,153,29))/255.)
+    
+    ax.spines['left'].set_linewidth(3)
+    ax.spines['bottom'].set_linewidth(3)
+    
+    #### Set tick width
+    ax.tick_params(width = 2,length = 5)
+
+
+    #### Write anchored text of threshold type
+#    threshold_type_at = AnchoredText("{}% {} Interval".format(round(confidence*100,2),interval.title()),prop=dict(size=10), frameon=False,loc = 4)        
+#    ax.add_artist(threshold_type_at)
+    
+    #### Set fig size borders and spacing
+    fig.set_figheight(7.5)
+    fig.set_figwidth(10)
+    fig.subplots_adjust(right = 0.95,top = 0.92,left = 0.09,bottom = 0.09)
+    
+    #### Set save path
+    save_path = "{}".format(data_path)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+    
+    now = pd.to_datetime(datetime.now())
+    
+    #### Save figure
+    plt.savefig('{}/Velocity vs Acceleration {} {} Threshold Line {} For AOGS.png'.format(save_path,round(confidence*100,2),interval.title(),now.strftime("%Y-%m-%d_%H-%M")),
+            dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+    #### Set white to transparent
+    img = Image.open('{}/Velocity vs Acceleration {} {} Threshold Line {} For AOGS.png'.format(save_path,round(confidence*100,2),interval.title(),now.strftime("%Y-%m-%d_%H-%M")))
+    img = img.convert("RGBA")
+    datas = img.getdata()
+    
+    newData = []
+    for item in datas:
+        if item[0] == 255 and item[1] == 255 and item[2] == 255:
+            newData.append((255, 255, 255, 0))
+        else:
+            newData.append(item)
+    
+    img.putdata(newData)
+    img.save('{}/Velocity vs Acceleration {} {} Threshold Line {} For AOGS.png'.format(save_path,round(confidence*100,2),interval.title(),now.strftime("%Y-%m-%d_%H-%M")), "PNG")
