@@ -20,10 +20,11 @@ from scipy.ndimage import filters
 from sqlalchemy import create_engine
 from sklearn import metrics
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
+from scipy.spatial import ConvexHull
 
 ### Include Analysis folder of updews-pycodes (HARD CODED!!)
 
-path = os.path.abspath("C:\Users\Win8\Documents\Dynaslope\Data Analysis\updews-pycodes\Analysis")
+path = os.path.abspath("D:\Leo\Dynaslope\Data Analysis\updews-pycodes\Analysis")
 if not path in sys.path:
     sys.path.insert(1,path)
 del path 
@@ -47,6 +48,12 @@ for i in range(len(tableau20)):
     tableau20[i] = (r / 255., g / 255., b / 255.)   
 
 data_path = os.path.dirname(os.path.realpath(__file__))
+
+#### Color keys
+color_key = {'sp_velocity':tableau20[0],'sp_acceleration':tableau20[2],'velocity':tableau20[4],'displacement':tableau20[10]}
+
+#### Title Keys
+title_key = {'sp_velocity':'Spline Velocity','sp_acceleration':'Spline Acceleration','velocity':'Velocity','displacement':'Displacement'}
 
 ####
 
@@ -612,6 +619,9 @@ def MarkerSplineComputations(marker_kinematics,num_pts = 10):
     
     #### Compute for the kinematic parameters of the marker data
     marker_kinematics_with_spline_computation = marker_kinematics_grouped.apply(ComputeSplineVelAccel,num_pts).reset_index()[['timestamp','site_id','crack_id','meas','displacement','time_interval','velocity','sp_velocity','sp_acceleration']]
+    
+    #### Marker spline fill na
+    marker_kinematics_with_spline_computation = marker_kinematics_with_spline_computation.fillna(0)
     
     return marker_kinematics_with_spline_computation
     
@@ -3447,19 +3457,420 @@ def OptimizeThresholds(optimal_thresholds):
         
     return optimized_thresholds
     
+def ComputeROCPointsTimeBin(marker_spline,time_within,parameter_name,time_start,time_end):
+    '''
+    Computes the fpr, tpr, and threshold points given the marker spline dataframe and parameter name
     
+    Parameters
+    ----------------------------
+    marker_kinematics - pd.DataFrame() 
+        Marker kinematics data frame
+    time_within - float
+        Time in hours in which the next measurement is made
+    parameter_name - string
+        name of the parameter whose ROC is to be plotted
+    time_start - float
+        Time in hours for the start of the bin
+    time_end - float
+        Time in hours for the end of the bin
     
+    Returns
+    ----------------------------
+    fpr - np.array
+        False positive points
+    tpr - np.array
+        True positive points
+    thresholds - np.array
+        Threshold points
+    pos - int
+        Number of positives
+    neg - int
+        Number of negative points
+    '''
     
+    #### Get false positive rates and true positive rates and corresponding thresholds
+    fpr, tpr, thresholds = metrics.roc_curve(marker_spline.condition.values,marker_spline[parameter_name].values)
     
+    #### Get number of positive points
+    pos = len(marker_spline[marker_spline.condition == 1])
     
+    #### Get number of negative points
+    neg = len(marker_spline[marker_spline.condition == -1])
     
+    return fpr, tpr, thresholds, pos, neg
     
+def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins):
+    '''
+    Plots the ROC Convex Hull for multiple parameters given the parameter list and time bins
     
+    Parameters
+    ----------------------------
+    marker_kinematics - pd.DataFrame() 
+        Marker kinematics data frame
+    time_within - float
+        Time in hours in which the next measurement is made
+    parameter_list - list
+        List of strings of the parameter name
+    time_bins - list
+        List of time bins
     
+    Returns
+    ----------------------------
+    None
+    '''
+    #### Get marker_condition dataframe
     
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_spline.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
     
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
     
+    #### Iterate through all time bins
+    for time_bin in time_bins:
+        
+        #### Get only the values for the specified time bin
+        cur_df = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_bin[1],marker_kinematics_with_condition.time_interval >= time_bin[0])]
+
+        #### Initialize points list
+        points = np.array([[1,0]])
+        
+        #### Initialize figure
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+                
+        #### Iterate through all parameters
+        for parameter in parameter_list:
+            
+            #### Compute for fpr, tpr and thresholds
+            fpr, tpr, thresholds, pos, neg = ComputeROCPointsTimeBin(cur_df,time_within,parameter,time_bin[0],time_bin[1])
+            
+            #### Plot current ROC curve
+            ax.plot(fpr,tpr,'-',color = color_key[parameter],label = parameter)
+            
+            #### Add to points list
+            points = np.append(points,zip(fpr,tpr),0)
+
+        #### Compute for ROC convex hull
+        ROCCH = ConvexHull(points).vertices
+        
+        #### Remove point zero
+        ROCCH = np.append(ROCCH[list(ROCCH).index(0):],ROCCH[:list(ROCCH).index(0)])[1:]
+        
+        #### Convert points to array
+        points = np.array(points)
+        
+        #### Plot Guess line
+        ax.plot(np.linspace(0,1,100),np.linspace(0,1,100),'-',color = tableau20[6],label = 'Random Guess',lw = 1,zorder = 1)
+
+        #### Plot Convex Hull
+        ax.plot(points[ROCCH,0],points[ROCCH,1],'--',color = tableau20[8], label = 'ROCCH')
+        
+        #### Print time bin
+        ax.text(0.97,0.11,'Time Bin {} to {}\nPos {} Neg {}'.format(time_bin[0],time_bin[1],pos,neg),transform = fig.transFigure,ha = 'right',fontsize = 10)    
+        
+        #### Plot legend
+        ax.legend(bbox_to_anchor = (1.03,1.01),fontsize = 10)
+        
+        #### Set axis labels
+        ax.set_xlabel('False Positive Rates',fontsize = 14)
+        ax.set_ylabel('True Positive Rates',fontsize = 14)
+        
+        #### Set figure label
+        fig.suptitle('ROC Convex Hull Plot',fontsize = 15)
+        
+        #### Set figsize
+        fig.set_figheight(8)
+        fig.set_figwidth(10)
+        
+        #### Set fig spacing
+        fig.subplots_adjust(top = 0.92,bottom = 0.17,left = 0.07,right = 0.95)
+
+        
+        #### Set aspect as equal
+        ax.set_aspect('equal')
     
+        #### Set save path 1
+        save_path = "{}\ROC\\ROCCH\\".format(data_path,time_bin[0],time_bin[1])
+        if not os.path.exists(save_path+'\\'):
+            os.makedirs(save_path+'\\')    
+    
+        #### Save fig
+        plt.savefig('{}\ROCCH Time Bin {} to {}.png'.format(save_path,time_bin[0],time_bin[1]),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_split,num_threshold,return_to_bin = False,alpha = 0.05):
+    '''
+    Splits the given data frame to several sets then performs threshold averaging for the given parameter and time bin
+    Then plots the corresponding ROC threshold average per specified step
+    
+    Parameters
+    ----------------------------
+    marker_kinematics - pd.DataFrame() 
+        Marker kinematics data frame
+    time_within - float
+        Time in hours in which the next measurement is made
+    parameter - string
+        Name of parameter
+    time_bin - tuple
+        Tuple of the time bin
+    num_split - int
+        Number of samples to be made from original df
+    num_threshold - int
+        Number of threshold confidence interval computation
+    return_to_bin - boleean
+        Set to True if sample is returned to the population after picking
+    alpha - float
+        
+    
+    Returns
+    --------------------------
+    None - plotting function only
+    
+    '''
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_spline.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
+
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+
+    #### Get only the values for the specified time bin
+    marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_bin[1],marker_kinematics_with_condition.time_interval >= time_bin[0])]
+    
+    #### Define sample size
+    sample_size = int(len(marker_kinematics_with_condition)/num_split)
+
+    #### Initialize the index array
+    index_array = np.zeros((num_split,int(len(marker_kinematics_with_condition)/num_split)))
+    indices = marker_kinematics_with_condition.index
+    
+    ### Initialize fpr, tpr, and threshold array
+    fpr_list = []
+    tpr_list = []
+    threshold_list = []
+    
+    #### Initialize multiple ROC figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Generate random sampling
+    for i in range(num_split):
+        
+        #### Get random sample from indices
+        sample = np.random.choice(indices,sample_size)
+
+        #### Store current sample to index array
+        index_array[i] = sample
+        
+        if not return_to_bin:
+            #### Remove the current sample to indices
+            indices = np.array(list(set(indices)-set(sample)))
+        
+        #### Get current df
+        current_df = marker_kinematics_with_condition.ix[sample]
+
+        #### Compute current fpr, tpr and thresholds
+        fpr, tpr, threshold, pos, neg = ComputeROCPointsTimeBin(current_df,time_within,parameter,time_bin[0],time_bin[1])
+        
+        #### Store results
+        fpr_list.append([fpr])
+        tpr_list.append([tpr])
+        threshold_list.append([threshold])
+        
+        #### Plot current result
+        ax.plot(fpr,tpr,'-')
+    
+    #### Plot Guess line
+    ax.plot(np.linspace(0,1,100),np.linspace(0,1,100),'-',color = tableau20[6],label = 'Random Guess',lw = 1,zorder = 1)
+    
+    #### Print number of data points and time bin
+    ax.text(0.975,0.025,'Time Bin {} to {}\nN {}\nSplit {}'.format(time_bin[0],time_bin[1],pos+neg,num_split),transform = fig.transFigure,ha = 'right',fontsize = 10)
+        
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Set figure label
+    fig.suptitle('Sampled ROC Plot for {} Threshold'.format(title_key[parameter]),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+  
+    #### Set save path 1
+    save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}".format(data_path,time_bin[0],time_bin[1])
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+
+    #### Save fig
+    plt.savefig('{}\{} Threshold {} N {} ret.png'.format(save_path,parameter,num_split,return_to_bin*1),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+
+    #### Compute fpr, tpr, threshold, pos, neg for all samples
+    fpr, tpr, threshold, pos, neg = ComputeROCPointsTimeBin(marker_kinematics_with_condition,time_within,parameter,time_bin[0],time_bin[1])
+    
+    #### Set fpr_points to plot based on given
+    fpr_points = np.linspace(0,1.,num_threshold)
+
+    ##### Start vertical averaging
+    
+    #### Initialize results container
+    vert_delta = []
+    
+    #### Iterate to each fpr_points
+    for fpr_point in fpr_points:
+        
+        #### Initialize tpr points
+        tpr_points = []
+        
+        #### Get index of the cur fpr point in each array of fpr_list
+        for cur_fpr_list,cur_tpr_list in zip(fpr_list,tpr_list):
+
+            #### Get tpr point
+            tpr_points.append(cur_tpr_list[0][cur_fpr_list[0] >= fpr_point][0])
+            
+        #### Compute confidence interval
+        
+        ### Set tpr points as array
+        tpr_points = np.array(tpr_points)
+        
+        ### Get t crit
+        t_crit = stats.t.ppf(1-alpha,num_split - 1)
+
+        ### Get sample standard dev
+        s = np.sqrt(1/float(num_split - 1)*np.sum(np.power(tpr_points - np.mean(tpr_points),2)))
+        
+        #### Get uncertainty
+        delta = t_crit*s/np.sqrt(num_split)
+        
+        #### Save to results container
+        vert_delta.append(delta)
+        
+    #### Get fpr and tpr points to plot for error bars
+    
+    #### Initialize results container
+    tpr_plot = []
+    fpr_plot = []
+    
+    #### Iterate to each fpr_points
+    for fpr_point in fpr_points:
+        
+        #### Get nearest point in fpr and tpr values
+        fpr_plot.append(fpr[fpr >= fpr_point][0])
+        tpr_plot.append(tpr[fpr >= fpr_point][0])
+    
+    #### Initialize plotting
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot average ROC
+    ax.plot(fpr,tpr,'-',color = tableau20[0],label = 'Average')
+    
+    #### Plot error bars
+    ax.errorbar(fpr_plot,tpr_plot,yerr = vert_delta,ecolor = tableau20[0],fmt = 'none',capthick = 1,elinewidth = 1,capsize = 4)
+
+    #### Plot guess line
+    ax.plot(np.linspace(0,1,100),np.linspace(0,1,100),'-',color = tableau20[6],label = 'Random Guess',lw = 1,zorder = 1)
+
+    #### Set axis labels
+    ax.set_xlabel('False Positive Rates',fontsize = 14)
+    ax.set_ylabel('True Positive Rates',fontsize = 14)
+    
+    #### Draw legend
+    ax.legend()
+    
+    #### Set figure label
+    fig.suptitle('Average ROC Plot for {} Threshold'.format(title_key[parameter]),fontsize = 15)
+    
+    #### Set figsize
+    fig.set_figheight(8)
+    fig.set_figwidth(8)
+    
+    #### Set aspect as equal
+    ax.set_aspect('equal')
+  
+    #### Set save path 1
+    save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Vertical Average\\".format(data_path,time_bin[0],time_bin[1])
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
+
+    #### Save fig
+    plt.savefig('{}\{} Threshold {} N {} ret.png'.format(save_path,parameter,num_split,return_to_bin*1),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    
+#    ####### Start confidence interval computation
+#    
+#    #### Get minimum from all maximum thresholds in threshold list
+#    
+#    #### Initialize minimum threshold
+#    min_threshold = 1e100
+#    
+#    #### Iterate through every array in threshold list
+#    for thresholds in threshold_list:
+#        print np.max(thresholds)
+#        #### Change current minimum
+#        if np.max(thresholds) <= min_threshold:
+#            min_threshold = np.max(thresholds)
+#    
+#    #### Get threshold array
+#    thresholds = np.logspace(-10,np.log10(min_threshold),num_threshold)
+#    print thresholds
+#    
+#    print fpr_list
+#    print tpr_list
+#    print threshold_list
+#    #### Compute for fpr error and tpr error per threshold
+#    
+#    #### Iterate through all specified thresholds
+#    for threshold in thresholds:
+#
+#        #### Initialize fpr and tpr points
+#        fpr_points = []
+#        tpr_points = []
+#        
+#        
+#        #### Iterate through all list in threshold list
+#        for i,cur_list in enumerate(threshold_list):
+#            print threshold
+#            #### Get fpr and tpr points
+#            fpr_points.append(np.array(fpr_list[i][0])[cur_list[0] <= threshold][0])
+#            tpr_points.append(np.array(tpr_list[i][0])[cur_list[0] <= threshold][0])
+#        print tpr_points
+#        print fpr_points
+    
+                       
+                       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     
     
