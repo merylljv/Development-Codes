@@ -344,6 +344,37 @@ def GetDispAndColPosDataFrame(event_timestamp,sensor_column,compute_vel = False)
     
     return monitoring_vel.reset_index(drop = True),colposdf[['ts','id','depth','xy','xz']].reset_index(drop = True),sensor_column
 
+def GetDispDataFrame(event_timestamp,sensor_column,compute_vel = False):
+    #### Get all required parameters from realtime plotter
+    col = q.GetSensorList(sensor_column)
+    window, config = rtw.getwindow(pd.to_datetime(event_timestamp[-1]))
+    window.start = pd.to_datetime(event_timestamp[0])
+    window.offsetstart = window.start - timedelta(days=(config.io.num_roll_window_ops*window.numpts-1)/48.)
+    config.io.col_pos_interval = str(int(colpos_interval_hours)) + 'h'
+    config.io.num_col_pos = int((window.end - window.start).days/colpos_interval_days + 1)
+    monitoring = gp.genproc(col[0], window, config, config.io.column_fix,comp_vel = compute_vel)
+
+    #### Get colname, num nodes and segment length
+#    num_nodes = monitoring.colprops.nos
+#    seg_len = monitoring.colprops.seglen
+    
+    if compute_vel:
+        monitoring_vel = monitoring.disp_vel.reset_index()[['ts', 'id', 'depth', 'xz', 'xy', 'vel_xz', 'vel_xy']]
+    else:
+        monitoring_vel = monitoring.disp_vel.reset_index()[['ts', 'id', 'depth', 'xz', 'xy']]
+    monitoring_vel = monitoring_vel.loc[(monitoring_vel.ts >= window.start)&(monitoring_vel.ts <= window.end)]
+    
+#    colposdf = cp.compute_colpos(window, config, monitoring_vel, num_nodes, seg_len)
+#    
+#    #### Recomputing depth
+#    colposdf['yz'] = np.sqrt(seg_len**2 - np.power(colposdf['xz'],2) - np.power(colposdf['xy'],2))
+#    colposdf_ts = colposdf.groupby('ts',as_index = False)
+#    colposdf = colposdf_ts.apply(compute_depth)
+#    colposdf['depth'] = map(lambda x:x - max(colposdf.depth.values),colposdf['depth'])
+    
+    return monitoring_vel.reset_index(drop = True),sensor_column
+
+
 def ComputeCumShear(disp_ts):
     cumsheardf = pd.DataFrame(columns = ['ts','cumshear','cum_xz','cum_xy'])
     cumsheardf.ix['ts'] = disp_ts.ts.values[0]
