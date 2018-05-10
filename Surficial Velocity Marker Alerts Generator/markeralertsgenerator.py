@@ -76,6 +76,24 @@ def nonrepeat_colors(ax,NUM_COLORS,color='gist_rainbow'):
     ax.set_color_cycle([cm(1.*(NUM_COLORS-i-1)/NUM_COLORS) for i in np.array(range(NUM_COLORS))[::-1]])
     return ax
 
+def cross_correlation(x,y):
+    '''
+    Returns the cross correlation coefficient between the two samples
+    
+    Parameters
+    ---------------------
+    x - np.array
+        Feature 1
+    y - np.array
+        Feature 2
+    
+    Returns
+    ---------------------
+    cross_corr - float
+        Cross correlation coefficient
+    '''
+    return (np.sum(x*y))/np.sqrt(np.sum(x**2)*np.sum(y**2))
+
 def offset_cut_off(optimal_thresholds):
     """
     Offsets cut off values for plotting
@@ -144,6 +162,67 @@ def GetAllMarkerData(mode = 'MySQL'):
     
     return df
 
+def GetA3Events():
+    '''
+    Function to obtain all A3 events from site_level_alert db
+    
+    Parameters
+    -----------------
+    None
+    
+    Returns
+    -----------------
+    a3_events - pd.DataFrame()
+        All a3 events data frame
+    '''
+    
+    #### Set query
+    query = "SELECT * FROM site_level_alert WHERE source = 'public' AND alert = 'A3'"
+    
+    #### Obtain data frame
+    a3_events = q.GetDBDataFrame(query)
+    
+    return a3_events
+
+def LabelA3Events(marker_spline,a3_events):
+    '''
+    Label All A3 events from the marker_spline data frame
+    
+    Parameters
+    -------------------
+    marker_spline - pd.DataFrame()
+        marker_spline data frame
+    
+    Returns
+    -------------------
+    marker_spline - pd.DataFrame()
+        Marker spline data frame with column a3
+    '''
+    
+    #### Set initial value of column a3 as zero
+    marker_spline['a3'] = 0
+    
+    #### Iterate through all A3 events
+    for time_start,site,time_end in a3_events[['timestamp','site','updateTS']].values:
+        
+        #### Upper caps the site name
+        site = site.upper()
+        
+        #### Set timestamp
+        time_start = pd.to_datetime(time_start)
+        time_end = pd.to_datetime(time_end)
+        
+        #### Set timestamp df
+        timestamps = np.array(map(lambda x:pd.to_datetime(x),marker_spline.timestamp.values))
+        
+        #### Set condition
+        mask = np.logical_and(np.logical_and(timestamps > time_start,timestamps <= time_end),marker_spline.site_id == site)
+        
+        #### Set value
+        marker_spline.loc[mask,['a3']] = 1
+    
+    return marker_spline
+
 def ComputeKinematicParameters(marker_data):
     """
     Computes the displacement, time interval, and velocity from the given marker data
@@ -174,6 +253,39 @@ def ComputeKinematicParameters(marker_data):
     marker_data['velocity'] = marker_data['displacement']/marker_data['time_interval']
     
     return marker_data
+
+def ComputeCorrelation(marker_group,parameter_1,parameter_2):
+    '''
+    Computes the correlation between the two parameters in the marker spline data frame (group by site_id and crack_id)
+    
+    Parameters
+    --------------------------
+    marker_group - pandas group data frame
+        Marker data frame grouped by site and crack
+    parameter_1 - string
+        Name of parameter 1
+    parameter_2 - string
+        Name of parameter 2
+    
+    Returns
+    --------------------------
+    marker_group - pandas group data frame
+        Marker data frame group with new column cor
+    '''
+    
+    #### Get values
+    feature1 = marker_group[parameter_1].values
+    feature2 = marker_group[parameter_2].values
+    
+    #### Normalize values
+    feature1 = 2*(feature1 - min(feature1)) / (max(feature1) - min(feature1)) - 1
+    feature2 = 2*(feature2 - min(feature2)) / (max(feature2) - min(feature2)) - 1
+                           
+    #### Store to data frame the result                       
+    marker_group['corr'] = (np.sum(feature1*feature2))/np.sqrt(np.sum(feature1**2)*np.sum(feature2**2))
+    
+    return marker_group
+    
 
 def GenerateKinematicsData(mode = 'MySQL'):
     """
@@ -327,6 +439,40 @@ def MarkTrueConditions(marker_kinematics,time_within):
     marker_kinematics_with_condition = marker_kinematics
     
     return marker_kinematics_with_condition
+
+def MarkOldThresholdPredictions(marker_kinematics):
+    """
+    Returns the marker kinematics data with corresponding true condition based on the definition of L2 success
+
+    
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() with additional columns ['displacement','velocity','time_interval']
+        Marker data with computed kinematics grouped by per site and marker name
+    """
+    
+    #### Initialize threshold predictions
+    marker_kinematics['old_predictions'] = 0
+    
+    #### Mask first threshold predictions
+    first_threshold_mask = marker_kinematics.timestamp <= np.datetime64(pd.to_datetime('2016-09-01 00:00'))
+    
+    #### First threshold predictions masks
+    four_hour_mask = first_threshold_mask * (marker_kinematics.time_interval <= 4.) * (marker_kinematics.displacement >= 0.5)
+    one_day_mask = first_threshold_mask * (marker_kinematics.time_interval > 4.) * (marker_kinematics.time_interval <= 24.) * (marker_kinematics.displacement >= 0.5)
+    three_day_mask = first_threshold_mask * (marker_kinematics.time_interval > 24.) * (marker_kinematics.time_interval <= 72.) * (marker_kinematics.displacement >= 1.5)
+    one_week_mask = first_threshold_mask * (marker_kinematics.time_interval > 72.) * (marker_kinematics.time_interval <= 184.) * (marker_kinematics.displacement >= 3.)
+    
+    #### New threshold mask
+    new_thresholds = (~first_threshold_mask) * (marker_kinematics.velocity >= 0.25)
+    
+    #### Create overall thresholds masks
+    all_thresholds_mask = four_hour_mask + one_day_mask + three_day_mask + one_week_mask + new_thresholds
+    
+    #### Mark predictions
+    marker_kinematics.loc[all_thresholds_mask,['old_predictions']] = 1
+    
+    return marker_kinematics
     
 def MarkVelocityThresholdPredictions(marker_kinematics_with_condition,velocity_threshold):
     """
@@ -3501,7 +3647,7 @@ def ComputeROCPointsTimeBin(marker_spline,time_within,parameter_name,time_start,
     
     return fpr, tpr, thresholds, pos, neg
     
-def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins):
+def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins,filter_a3 = False):
     '''
     Plots the ROC Convex Hull for multiple parameters given the parameter list and time bins
     
@@ -3515,6 +3661,8 @@ def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins
         List of strings of the parameter name
     time_bins - list
         List of time bins
+    filter_a3 - Boolean
+        Filter a3 values (requires labeled a3 values)
     
     Returns
     ----------------------------
@@ -3538,6 +3686,10 @@ def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins
     
     #### Get only displacement values < 100 cm
     marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
+    #### Filter a3 values
+    if filter_a3:
+        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.a3 == 0]
     
     #### Iterate through all time bins
     for time_bin in time_bins:
@@ -3647,7 +3799,12 @@ def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins
         ax.set_aspect('equal')
     
         #### Set save path 1
-        save_path = "{}\ROC\\ROCCH\\".format(data_path,time_bin[0],time_bin[1])
+        if filter_a3:
+            save_path = "{}\ROC\\ROCCH\\No A3\\".format(data_path,time_bin[0],time_bin[1])
+        else:
+            save_path = "{}\ROC\\ROCCH\\".format(data_path,time_bin[0],time_bin[1])
+        
+        #### Create savepath if not exists
         if not os.path.exists(save_path+'\\'):
             os.makedirs(save_path+'\\')    
     
@@ -3656,7 +3813,7 @@ def PlotMultipleROCConvexHull(marker_spline,time_within,parameter_list,time_bins
         
     return rocch_df[['parameter','bin_start','bin_end','fpr','tpr','threshold','m','pos','neg']]
 
-def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_split,num_threshold,return_to_bin = False,alpha = 0.05):
+def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_split,num_threshold,return_to_bin = False,alpha = 0.05,filter_a3 = False):
     '''
     Splits the given data frame to several sets then performs threshold averaging for the given parameter and time bin
     Then plots the corresponding ROC threshold average per specified step
@@ -3678,7 +3835,9 @@ def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_spl
     return_to_bin - boleean
         Set to True if sample is returned to the population after picking
     alpha - float
-        
+    
+    filter_a3 - Boolean
+        Filter a3 values (requires labeled a3 values)
     
     Returns
     --------------------------
@@ -3702,6 +3861,10 @@ def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_spl
 
     #### Get only the values for the specified time bin
     marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_bin[1],marker_kinematics_with_condition.time_interval >= time_bin[0])]
+    
+    #### Filter a3 values
+    if filter_a3:
+        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.a3 == 0]
     
     #### Define sample size
     sample_size = int(len(marker_kinematics_with_condition)/num_split)
@@ -3767,7 +3930,10 @@ def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_spl
     ax.set_aspect('equal')
   
     #### Set save path 1
-    save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}".format(data_path,time_bin[0],time_bin[1])
+    if filter_a3:
+        save_path = "{}\ROC\ROC Averaging\\No A3\\Time Bins\\{} to {}".format(data_path,time_bin[0],time_bin[1])
+    else:
+        save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}".format(data_path,time_bin[0],time_bin[1])
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
 
@@ -3862,7 +4028,10 @@ def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_spl
     ax.set_aspect('equal')
   
     #### Set save path 1
-    save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Vertical Average\\".format(data_path,time_bin[0],time_bin[1])
+    if filter_a3:
+        save_path = "{}\ROC\ROC Averaging\\No A3\\Time Bins\\{} to {}\\Vertical Average\\".format(data_path,time_bin[0],time_bin[1])
+    else:
+        save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Vertical Average\\".format(data_path,time_bin[0],time_bin[1])
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
 
@@ -3959,14 +4128,17 @@ def PlotROCThresholdAverage(marker_spline,time_within,parameter,time_bin,num_spl
     ax.set_aspect('equal')
   
     #### Set save path 1
-    save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Threshold Average\\".format(data_path,time_bin[0],time_bin[1])
+    if filter_a3:
+        save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Threshold Average\\".format(data_path,time_bin[0],time_bin[1])
+    else:
+        save_path = "{}\ROC\ROC Averaging\\Time Bins\\{} to {}\\Threshold Average\\".format(data_path,time_bin[0],time_bin[1])
     if not os.path.exists(save_path+'\\'):
         os.makedirs(save_path+'\\')    
 
     #### Save fig
     plt.savefig('{}\{} Threshold {} N {} ret.png'.format(save_path,parameter,num_split,return_to_bin*1),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
         
-def GetOptimalThresholdFromROCCH(marker_spline,rocch_df,cost_fp,cost_fn,time_within,num_split,return_to_bin = False,alpha = 0.05):
+def GetOptimalThresholdFromROCCH(marker_spline,rocch_df,cost_fp,cost_fn,time_within,num_split,return_to_bin = False,alpha = 0.05,filter_a3 = False):
     '''
     Gets the optimal threshold dataframe based on ROCCH and cost functions per time bin
     
@@ -3988,6 +4160,8 @@ def GetOptimalThresholdFromROCCH(marker_spline,rocch_df,cost_fp,cost_fn,time_wit
         Set to True if sample is returned to the population after picking
     alpha - float
         Confidence condition
+    filter_a3 - Boolean
+        Filter a3 values (requires labeled a3 values)
         
     Returns
     ----------------------
@@ -4021,7 +4195,7 @@ def GetOptimalThresholdFromROCCH(marker_spline,rocch_df,cost_fp,cost_fn,time_wit
         time_bin = (bin_start,bin_end)
         
         #### Get fpr and tpr error
-        tpr_err_point, fpr_err_point = ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,threshold_point,return_to_bin,alpha)
+        tpr_err_point, fpr_err_point = ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,threshold_point,return_to_bin,alpha,filter_a3)
         
         #### Append to results container
         tpr_err.append(tpr_err_point)
@@ -4037,7 +4211,7 @@ def GetOptimalThresholdFromROCCH(marker_spline,rocch_df,cost_fp,cost_fn,time_wit
                          
     return optimal_thresholds_df
 
-def ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,threshold_point,return_to_bin = False,alpha = 0.05):
+def ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,threshold_point,return_to_bin = False,alpha = 0.05,filter_a3 = False):
     '''
     Gets the tpr_err and fpr_err of the given threshold value of the ROC curve sampled according to specifications
     
@@ -4059,7 +4233,8 @@ def ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,t
         Set to True if sample is returned to the population after picking
     alpha - float
         Confidence condition
-        
+    filter_a3 - Boolean
+        Filter a3 values (requires labeled a3 values)
     
     Returns
     --------------------------
@@ -4085,6 +4260,10 @@ def ComputeThresholdErr(marker_spline,time_within,parameter,time_bin,num_split,t
 
     #### Get only the values for the specified time bin
     marker_kinematics_with_condition = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_bin[1],marker_kinematics_with_condition.time_interval >= time_bin[0])]
+    
+    #### Filter a3 values
+    if filter_a3:
+        marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.a3 == 0]
     
     #### Define sample size
     sample_size = int(len(marker_kinematics_with_condition)/num_split)
@@ -4629,8 +4808,156 @@ def PlotROCThresholdAverageSPP(marker_spline,time_within,parameter,time_bin,num_
 
     #### Save fig
     plt.savefig('{}\{} Threshold {} N {} ret.png'.format(save_path,parameter,num_split,return_to_bin*1),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
-        
+    
+def GetOldThresholdsResults(marker_spline,time_within,time_bins):
+    '''
+    Get the performance of old thresholds
+    
+    Parameters
+    ------------------
+    marker_spline - pd.DataFrame()
+        Marker spline data frame
+    
+    Returns
+    ------------------
+    threshold_performance - pd.DataFrame()
+        Threshold performance data frame
+    '''
+    
+    #### Initialize results data frame
+    threshold_performance = pd.DataFrame(columns = ['bin_start','bin_end','fpr','tpr','pos','neg','pos_pred'])
+    
+    #### Get marker_condition dataframe
+    
+    #### Group based on site_id and crack_id
+    marker_kinematics_grouped = marker_spline.groupby(['site_id','crack_id'],as_index = False)
+    marker_kinematics_with_condition = marker_kinematics_grouped.apply(MarkTrueConditions,time_within).reset_index()
 
+    #### Get only values taken within specified time_within
+    marker_kinematics_with_condition = SuccededWithinTime(marker_kinematics_with_condition,time_within)
+
+    #### Get only non-zero displacement values
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement != 0]
+    
+    #### Get only displacement values < 100 cm
+    marker_kinematics_with_condition = marker_kinematics_with_condition[marker_kinematics_with_condition.displacement <= 100]
+    
+    #### Mark old preditioncs
+    marker_kinematics_with_condition = MarkOldThresholdPredictions(marker_kinematics_with_condition)
+    
+    for time_bin in time_bins:
+        print time_bin
+        #### Get only the values for the specified time bin
+        cur_df = marker_kinematics_with_condition[np.logical_and(marker_kinematics_with_condition.time_interval <= time_bin[1],marker_kinematics_with_condition.time_interval >= time_bin[0])]
+
+        #### Get TP, FP, P, N
+        true_positive = np.sum((cur_df.condition.values == 1) * (cur_df.old_predictions.values == 1) )
+        false_positive = np.sum((cur_df.condition.values == -1) * (cur_df.old_predictions.values == 1))
+        positives = float(np.sum(cur_df.condition.values == 1))
+        negatives = float(np.sum(cur_df.condition.values == -1))
+        
+        #### Compute tpr
+        tpr = true_positive/positives
+        fpr = false_positive/negatives
+        
+        #### Get number of positive predictions
+        pos_pred = np.sum(cur_df.old_predictions)
+        
+        #### Append to results data frame
+        threshold_performance = threshold_performance.append(pd.Series({'bin_start':time_bin[0],'bin_end':time_bin[1],'fpr':fpr,'tpr':tpr,'pos':positives,'neg':negatives,'pos_pred':pos_pred}),ignore_index =True)
+    
+    return threshold_performance
+        
+def PlotThresholdSelectionConvexHull(thresholds_csv_file,time_bins):
+    '''
+    Compares obtained optimal thresholds using ROCCH from threshold csv file
+    
+    Parameters
+    ------------------------
+    threshold_csv_file - string
+        Threshold csv file
+    
+    Returns
+    ---------------------
+    None - plotting function only
+    '''
+    #### Set colors
+    threshold_color = {'current':tableau20[0],'new':tableau20[2],'no a3':tableau20[4],'no a3 no sp accel':tableau20[6]}
+    
+    #### Set labels
+    threshold_labels = {'current':'Current','new':'New','no a3':'No A3','no a3 no sp accel':'No A3 Accel'}
+    
+    #### Set zorders
+    threshold_zorders = {'current':4,'new':3,'no a3':2,'no a3 no sp accel':1}
+    
+    #### Get all threshold csv file
+    thresholds_df = pd.read_csv(thresholds_csv_file)
+    
+    #### Iterate through time bins
+    for bin_start,bin_end in time_bins:
+        
+        #### Get current df
+        cur_df = thresholds_df[thresholds_df.bin_start == bin_start]
+                
+        #### Initialize figure
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+                
+        #### Iterate through all threshold types
+        for threshold_type in np.unique(cur_df['type'].values):
+            
+            #### Get current df
+            cur_df2 = cur_df[cur_df['type'] == threshold_type]
+            
+            #### Compute for fpr, tpr and thresholds
+            fpr = cur_df2.fpr.values
+            tpr = cur_df2.tpr.values
+            
+            #### Plot current ROC curve
+            ax.plot(fpr,tpr,'.',color = threshold_color[threshold_type],label = threshold_labels[threshold_type],markersize = 16,zorder = threshold_zorders[threshold_type])
+            
+        #### Plot Guess line
+        ax.plot(np.linspace(0,1,100),np.linspace(0,1,100),'-',color = tableau20[6],label = 'Random Guess',lw = 1.75,zorder = 1)
+        
+        #### Print time bin
+        ax.text(1.06,0.11,'Time Bin {} to {}'.format(bin_start,bin_end),transform = fig.transFigure,ha = 'right',fontsize = 10)    
+        
+        ### Plot legend
+        ax.legend(bbox_to_anchor = (1.03,1.001),fontsize = 14)
+        
+        #### Set axis labels
+        ax.set_xlabel('False Positive Rates',fontsize = 20)
+        ax.set_ylabel('True Positive Rates',fontsize = 20)
+        
+        #### Set figure label
+        fig.suptitle('ROC Convex Hull Plot',fontsize = 21)
+        
+        #### Set figsize
+        fig.set_figheight(8)
+        fig.set_figwidth(10)
+        
+        #### Set fig spacing
+        fig.subplots_adjust(top = 0.92,bottom = 0.17,left = 0.07,right = 0.95)
+
+        
+        #### Set aspect as equal
+        ax.set_aspect('equal')
+    
+        #### Set save path 1
+        save_path = "{}\Optimal Thresholds\\ROC\\".format(data_path)
+        if not os.path.exists(save_path+'\\'):
+            os.makedirs(save_path+'\\')    
+    
+        #### Save fig
+        plt.savefig('{}\ROCCH Time Bin {} to {}.png'.format(save_path,bin_start,bin_end),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+        
+    
+    
+    
+    
+    
+    
+    
 
 
 
