@@ -184,7 +184,7 @@ def GetDisplacementPlots(subsurface_data):
     
     return subsurface_data
 
-def GetFeatureVectors(subsurface_data,m,train_ratio,ave_window = 48):
+def GetFeatureVectors(subsurface_data,m,train_ratio,ave_window = '4H'):
     '''
     Creates the normalized input feature vectors and output vector from the time series divided according to train and test set
     
@@ -207,12 +207,9 @@ def GetFeatureVectors(subsurface_data,m,train_ratio,ave_window = 48):
     #### Drop na from data frame
     subsurface_data.dropna(inplace = True)
     
-    #### Get smoothened displacement data
-    displacement = subsurface_data.disp.rolling(ave_window).mean().dropna().values
-    
-#    #### Smoothen displacement data by moving averages
-#    displacement = movingaverage(displacement,ave_window)
-    
+    #### Get smoothened and resampled displacement data
+    displacement = subsurface_data[['ts','disp']].resample(ave_window,label = 'right',closed = 'right',on = 'ts').mean().disp.dropna().values
+
     #### Normalize displacement values
     displacement = (displacement - min(displacement))/(max(displacement) - min(displacement))
     
@@ -241,6 +238,63 @@ def GetFeatureVectors(subsurface_data,m,train_ratio,ave_window = 48):
     test_y = Y[last_index:]
     
     return train_x, train_y, test_x, test_y
+
+def GetFeatureVectors2(subsurface_data,m,train_ratio,ave_window = '4H',smooth_window = 3):
+    '''
+    Creates the normalized input feature vectors and output vector from the time series divided according to train and test set
+    
+    Parameters
+    -----------------------------
+    subsurface_data - pd.DataFrame()
+        DataFrame with displacement and time column
+    m - int
+        Embedding dimension
+    train_ratio - float
+        Desire ratio between training and testing sets
+    ave_window - int
+        Moving average window
+    
+    Returns
+    -----------------------------
+    train_x, train_y, test_x, test_y - np.array
+    '''
+    
+    #### Get smoothened and resampled displacement data
+    subsurface_data_xz = subsurface_data[['ts','xz']].resample(ave_window,label = 'right',closed = 'right',on = 'ts').mean().rolling(smooth_window).mean()
+
+    #### Get displacement column
+    subsurface_data_xz['disp'] = subsurface_data_xz.xz - subsurface_data_xz.xz.shift(1)
+    displacement = subsurface_data_xz.disp.dropna().values
+
+    #### Normalize displacement values
+    displacement = (displacement - min(displacement))/(max(displacement) - min(displacement))
+    
+    #### Initialize results list
+    X = []
+    Y = []
+    
+    #### Iterate through the data frame based on m
+    for i in range(len(displacement)-m):
+        
+        #### Add to list
+        X.append(displacement[i:i+m])
+        Y.append(displacement[i+m])
+    
+    #### Convert results to array
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    #### Get last index of training set
+    last_index = int(len(X)*train_ratio)
+    
+    #### Split into training set and test set
+    train_x = X[0:last_index]
+    train_y = Y[0:last_index]
+    test_x = X[last_index:]
+    test_y = Y[last_index:]
+    
+    return train_x, train_y, test_x, test_y
+
     
 def GetOptimalCLF(train_x,train_y,rand_starts = 8):
     '''
@@ -350,7 +404,7 @@ def GetOptimalCLF2(train_x,train_y,rand_starts = 8):
     
     return max_clf
 
-def GetTrainTestPlotResult(subsurface_data,clf,train_x,train_y,test_x,test_y,ave_window = 48):
+def GetTrainTestPlotResult(subsurface_data,clf,train_x,train_y,test_x,test_y,ave_window = '4H'):
     '''
     Gets the superimposed plots of the actual and predicted training and test data via the trained ANN.
     Computes the rmse error of the classifier.
@@ -429,8 +483,11 @@ def GetTrainTestPlotResult(subsurface_data,clf,train_x,train_y,test_x,test_y,ave
     #### Plot cumulative displacement data predictions ####
     #######################################################
     
-    #### Get smoothened displacement data
-    displacement = subsurface_data.disp.rolling(ave_window).mean().dropna().values
+    #### Drop na from data frame
+    subsurface_data.dropna(inplace = True)
+    
+    #### Get smoothened and resampled displacement data
+    displacement = subsurface_data[['ts','disp']].resample(ave_window,label = 'right',closed = 'right',on = 'ts').mean().disp.dropna().values
     
     #### Denormalize quantities
     dn_actual = np.concatenate((train_y,test_y))*(max(displacement) - min(displacement)) + min(displacement)
@@ -477,7 +534,140 @@ def GetTrainTestPlotResult(subsurface_data,clf,train_x,train_y,test_x,test_y,ave
     rmse = np.sqrt(np.sum(np.power(test_y - pred_test,2))/float(len(test_y)))
     
     return rmse
+
+def GetTrainTestPlotResult2(subsurface_data,clf,train_x,train_y,test_x,test_y,ave_window = '4H',smooth_window = 12):
+    '''
+    Gets the superimposed plots of the actual and predicted training and test data via the trained ANN.
+    Computes the rmse error of the classifier.
     
+    Parameters
+    -------------------
+    subsurface_data - pd.DataFrame()
+        Subsurface data frame
+    clf - sklearn classifier
+        Trained ANN
+    train_x - np.array
+        Training feature vectors
+    train_y - np.array
+        Training label vectors
+    test_x - np.array
+        Test feature vectors
+    test_y - np.array
+        Test label vectors
+    ave_window - int
+        Moving average window
+    
+    Returns
+    -------------------
+    test_rmse - root mean square error of the classifier
+    '''
+    
+    #### Get data predictions of ANN
+    pred_train = clf.predict(train_x)
+    pred_test = clf.predict(test_x)
+    
+    #### Get starting indexes for plotting
+    start_index = len(subsurface_data) - (len(train_y) + len(test_y))
+    
+    ############################################
+    #### Plot displacement data predictions ####
+    ############################################
+    
+    #### Initialize figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot measured data points
+    ax.plot(subsurface_data.ts.values[start_index:],np.concatenate((train_y,test_y)),label = 'Measured',lw = 3.0)
+    
+    #### Plot predicted data points
+    ax.plot(subsurface_data.ts.values[start_index:],np.concatenate((pred_train,pred_test)),lw = 1.5,label = 'Predicted')
+    
+    #### Plot predicted boundary
+    ax.axvline(subsurface_data.ts.values[start_index + len(train_y)],ls = '--',color = tableau20[14])
+    
+    #### Plot legend
+    ax.legend(bbox_to_anchor = (1.22,1.0),fontsize = 14)
+    
+    #### Set datetime format for x axis
+    ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+    
+    #### Set axis labels and legend
+    ax.set_xlabel('Date',fontsize = 16)
+    ax.set_ylabel('Displacement (m)',fontsize = 16)
+    
+    #### Set fig size, borders and spacing
+    fig.set_figheight(7.5)
+    fig.set_figwidth(10)
+    fig.subplots_adjust(right = 0.95,top = 0.92,left = 0.100,bottom = 0.15)
+    
+    #### Set save path
+    save_path = "{}/ANN2//traintest//{} {}//".format(data_path,subsurface_data.name.values[0],int(subsurface_data.id.values[0]))
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+    
+    #### Save figure
+    plt.savefig('{}/m {} {} smooth {}.png'.format(save_path,int(train_x.shape[1]),ave_window,smooth_window),
+            dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #######################################################
+    #### Plot cumulative displacement data predictions ####
+    #######################################################
+    
+    #### Get smoothened and resampled displacement data
+    subsurface_data_xz = subsurface_data[['ts','xz']].resample(ave_window,label = 'right',closed = 'right',on = 'ts').mean().rolling(smooth_window).mean()
+    
+    #### Get displacement column
+    subsurface_data_xz['disp'] = subsurface_data_xz.xz - subsurface_data_xz.xz.shift(1)
+    displacement = subsurface_data_xz.disp.dropna().values
+
+    #### Denormalize quantities
+    dn_actual = np.concatenate((train_y,test_y))*(max(displacement) - min(displacement)) + min(displacement)
+    dn_pred = np.concatenate((pred_train,pred_test))*(max(displacement) - min(displacement)) + min(displacement)
+    
+    #### Initialize figure
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    #### Plot measured data points
+    ax.plot(subsurface_data.ts.values[start_index:],np.cumsum(dn_actual),label = 'Measured',lw = 3.0)
+    
+    #### Plot predicted data points
+    ax.plot(subsurface_data.ts.values[start_index:],np.cumsum(dn_pred),lw = 1.5,label = 'Predicted')
+    
+    #### Plot predicted boundary
+    ax.axvline(subsurface_data.ts.values[start_index + len(train_y)],ls = '--',color = tableau20[14])
+    
+    #### Plot legend
+    ax.legend(bbox_to_anchor = (1.22,1.0),fontsize = 14)
+    
+    #### Set datetime format for x axis
+    ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+    
+    #### Set axis labels and legend
+    ax.set_xlabel('Date',fontsize = 16)
+    ax.set_ylabel('Displacement (m)',fontsize = 16)
+    
+    #### Set fig size, borders and spacing
+    fig.set_figheight(7.5)
+    fig.set_figwidth(10)
+    fig.subplots_adjust(right = 0.95,top = 0.92,left = 0.100,bottom = 0.15)
+    
+    #### Set save path
+    save_path = "{}/ANN2//traintestcumsum//{} {}//".format(data_path,subsurface_data.name.values[0],int(subsurface_data.id.values[0]))
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')    
+    
+    #### Save figure
+    plt.savefig('{}/m {} {} smooth {}.png'.format(save_path,int(train_x.shape[1]),ave_window,smooth_window),
+            dpi=160, facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #### Compute the rmse
+    rmse = np.sqrt(np.sum(np.power(test_y - pred_test,2))/float(len(test_y)))
+    
+    return rmse
+
+ 
 def PlotRMSE(rmse_csv_file):
     '''
     Reads the rmse results csv file and plots RMSE vs m and Epochs vs m
