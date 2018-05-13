@@ -48,6 +48,12 @@ for i in range(len(tableau20)):
     r, g, b = tableau20[i]    
     tableau20[i] = (r / 255., g / 255., b / 255.)   
 
+dyna_colors = [(22,82,109),(153,27,30),(248,153,29)]
+
+for i in range(len(dyna_colors)):
+    r_d,g_d,b_d = dyna_colors[i]
+    dyna_colors[i] = (r_d / 255., g_d / 255., b_d / 255.)
+
 data_path = os.path.dirname(os.path.realpath(__file__))
 
 #### Color keys
@@ -4951,9 +4957,52 @@ def PlotThresholdSelectionConvexHull(thresholds_csv_file,time_bins):
         #### Save fig
         plt.savefig('{}\ROCCH Time Bin {} to {}.png'.format(save_path,bin_start,bin_end),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
         
+def PlotHistogramOldThresholdsOccurrence(marker_kinematics,bins):
+    '''
+    Histogram plot of the occurrence of old thresholds
     
+    Parameters
+    -----------------
+    marker_kinematics - pd.DataFrame()
+        Marker kinematics data frame
+    bins - int
+        Number of bins to be used in plotting
     
+    Returns
+    ----------------
+    None - plotting function only
+    '''
     
+    #### Get old threshold predictions
+    marker_old = MarkOldThresholdPredictions(marker_kinematics)
+    
+    #### Plot histogram of old threshold exceedances
+    ax = marker_old[marker_old.old_predictions == 1].timestamp.hist(bins = bins,color = dyna_colors[1])
+    
+    #### Get current figure
+    fig = plt.gcf()
+    
+    #### Set axis labels
+    ax.set_xlabel('Date',fontsize = 14)
+    ax.set_ylabel('Frequency',fontsize = 14)
+    
+    #### Set x axis date format
+    ax.xaxis.set_major_formatter(md.DateFormatter("%d%b'%y"))
+    
+    #### Set figure label
+    fig.suptitle('Histogram Plot of Current Threshold Exceedance',fontsize = 15)
+    
+    #### Set fig size
+    fig.set_figheight(6.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\\Histograms\\Old Thresholds\\".format(data_path)
+    if not os.path.exists(save_path+'/'):
+        os.makedirs(save_path+'/')   
+        
+    #### Save fig
+    plt.savefig('{}\\Histogram plot for Current Threshold Exceedance bins {}.png'.format(save_path,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
     
     
     
