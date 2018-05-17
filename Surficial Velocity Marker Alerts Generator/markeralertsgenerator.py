@@ -5004,8 +5004,88 @@ def PlotHistogramOldThresholdsOccurrence(marker_kinematics,bins):
     #### Save fig
     plt.savefig('{}\\Histogram plot for Current Threshold Exceedance bins {}.png'.format(save_path,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
     
+def GetMarkerDataPriorA3Accel(marker_kinematics,a3_events,num_pts):
+    '''
+    Gets the last data points based on the timestamp and number of points specified and compute its acceleration
     
+    Parameters
+    -------------------
+    marker_kinematics - pd.DataFrame()
+        Marker kinematics data frame
+    timestamp - pd.to_datetime object
+        End timestamp
+    site_id - string
+        Site of interest
+    num_pts - int
+        Number of points to include
     
+    Returns
+    -------------------
+    marker_prior_a3 - pd.DataFrame()
+        Marker kinematics data frame with data before a3 and computed accelerations
+    '''
+    #### Initialize results data frame
+    marker_prior_a3 = pd.DataFrame()
+    
+    #### Iterate through all a3_events
+    for site, end in a3_events[['site','timestamp']].values:
+        
+        #### Get maximum timestamp of data before a3 event
+        max_timestamp = max(marker_kinematics.loc[(marker_kinematics.site_id == site) * (marker_kinematics.timestamp <= end)].timestamp.values)
+
+        #### Get all relevant marker
+        markers = np.unique(marker_kinematics.loc[(marker_kinematics.site_id == site) * (marker_kinematics.timestamp == max_timestamp)].crack_id.values)
+        
+        #### Iterate through all markers
+        for marker in markers:
+            
+            #### Get current data frame
+            cur_df = marker_kinematics.loc[(marker_kinematics.site_id == site) * 
+                                                                       (marker_kinematics.timestamp <= end) *
+                                                                       (marker_kinematics.crack_id == marker)].tail(num_pts)
+            
+            #### Check minimum timestamp does not exceed 1 year
+            if pd.Timedelta(max_timestamp - min(cur_df.timestamp.values)) <= pd.Timedelta(1,'Y'):
+            
+                #### Compute for acceleration
+                cur_df['acceleration'] = (cur_df.velocity - cur_df.velocity.shift(1)) / cur_df.time_interval
+                
+                #### Mark non-zero initial and final velocities
+                
+                #### Construct mask
+                mask = (cur_df.velocity.shift(1) != 0) * (cur_df.velocity != 0)
+                
+                cur_df['non_zero'] = mask * 1
+                      
+                #### Append current data computation
+                marker_prior_a3 = marker_prior_a3.append(cur_df)
+                
+            else:
+                pass
+    
+    return marker_prior_a3
+    
+def PlotHistogramAccelerationBeforeA3(marker_prior_a3,bins):
+    '''
+    Histogram plot of acceleration before A3 events
+    
+    Parameters
+    -----------------
+    marker_prior_a3 - pd.DataFrame()
+        Marker kinematics data frame with data before a3 and computed accelerations
+    bins - int
+        Number of bins used in histogram plotting
+
+    
+    Returns
+    -----------------
+    None
+    '''
+    
+    #### 
+    marker_prior_a3.loc[(marker_prior_a3.non_zero == 1) * (marker_prior_a3.acceleration > 0)].dropna()
+    
+    return marker_prior_a3
     
 
 
