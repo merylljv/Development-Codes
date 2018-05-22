@@ -479,7 +479,61 @@ def MarkOldThresholdPredictions(marker_kinematics):
     marker_kinematics.loc[all_thresholds_mask,['old_predictions']] = 1
     
     return marker_kinematics
+
+def MarkOptimalThresholdPredictions(marker_kinematics):
+    """
+    Returns the marker kinematics data with corresponding optimal threshold predictions
+
     
+    Parameters
+    ------------------
+    marker_kinematics: pd.DataFrame() with additional columns ['displacement','velocity','time_interval']
+    
+    Returns
+    ------------------
+    marker_kinematics: pd.DataFrame() with opt_predictions column
+    """
+    
+    #### Initialize threshold predictions
+    marker_kinematics['opt_predictions'] = 0
+    
+    #### Create threshold masks
+    
+    #### Time bin 0 to 11
+    threshold_1 = (marker_kinematics.time_interval < 11) * (marker_kinematics.sp_velocity >= 0.02765)
+    
+    #### Time bin 11 to 33
+    threshold_2 = (marker_kinematics.time_interval >= 11) * (marker_kinematics.time_interval < 33) * (marker_kinematics.sp_acceleration >= 0.07126)
+    threshold_3 = (marker_kinematics.time_interval >= 11) * (marker_kinematics.time_interval < 33) * (marker_kinematics.sp_velocity >= 0.42562)
+    
+    #### Time bin 33 to 63
+    threshold_4 = (marker_kinematics.time_interval >= 33) * (marker_kinematics.time_interval < 63) * (marker_kinematics.sp_velocity >= 0.00489)
+    
+    #### Time bin 63 to 81
+    threshold_5 = (marker_kinematics.time_interval >= 63) * (marker_kinematics.time_interval < 81) * (marker_kinematics.sp_acceleration >= 0.00016)
+    threshold_6 = (marker_kinematics.time_interval >= 63) * (marker_kinematics.time_interval < 81) * (marker_kinematics.sp_velocity >= 0.03196)
+    
+    #### Time bin 81 to 111
+    threshold_7 = (marker_kinematics.time_interval >= 81) * (marker_kinematics.time_interval < 111) * (marker_kinematics.sp_velocity >= 0.05309)
+    
+    #### Time bin 111 to 154
+    threshold_8 = (marker_kinematics.time_interval >= 111) * (marker_kinematics.time_interval < 154) * (marker_kinematics.sp_acceleration >= 5.5e-5)
+    
+    #### Time bin 154 to 184
+    threshold_9 = (marker_kinematics.time_interval >= 154) * (marker_kinematics.time_interval < 184) * (marker_kinematics.sp_acceleration >= 2.05e-5)
+    
+    #### Time bin 184 to 720
+    threshold_10 = (marker_kinematics.time_interval >= 184) * (marker_kinematics.time_interval < 720) * (marker_kinematics.sp_acceleration >= 0.00051)
+    
+    #### Sum all the threshold masks
+    total_threshold_mask = threshold_1 + threshold_2 + threshold_3 + threshold_4 + threshold_5 + threshold_6 + threshold_7 + threshold_8 + threshold_9 + threshold_10
+
+    #### Set exceedance to 1 for threshold exceedance
+    marker_kinematics.loc[total_threshold_mask,['opt_predictions']] = 1
+                         
+    return marker_kinematics
+    
+
 def MarkVelocityThresholdPredictions(marker_kinematics_with_condition,velocity_threshold):
     """
     Returns the marker kinematics data with corresponding true condition based on the definition of L2 success
@@ -2188,27 +2242,27 @@ def PlotHistograms(marker_kinematics, parameter_name,time_within,bins = 750):
         
         #### 7 day line
         ax.axvline(x = 168,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('7 days',xy = (169,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### 4 day line
         ax.axvline(x = 96,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('4 days',xy = (97,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### 3 day line
         ax.axvline(x = 72,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('3 days',xy = (73,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### 2 day line
         ax.axvline(x = 48,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('2 days',xy = (49,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### 1 day line
         ax.axvline(x = 24,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('1 day',xy = (25,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### 4 hour line
         ax.axvline(x = 4,ls = '--',color = tableau20[6],zorder = 2,lw = 1,alpha = 0.75)
-        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 8,rotation_mode = 'anchor')
+        ax.annotate('4 hours',xy = (5,1.01),xycoords = trans,rotation = 60,fontsize = 10,rotation_mode = 'anchor')
         
         #### Set xlim
         ax.set_xlim([-35,720])
@@ -2226,14 +2280,14 @@ def PlotHistograms(marker_kinematics, parameter_name,time_within,bins = 750):
             time_bin_patch = ax.axvspan(time[0],time[1],facecolor = tableau20[(i)*2 + 1], alpha = 0.5,label = '{} to {}'.format(time[0],time[1]))
             time_bin_patches.append(time_bin_patch)
         
-        ax.legend(bbox_to_anchor = (1.15,0.999),fontsize = 10)
+        ax.legend(bbox_to_anchor = (1.007,0.999),fontsize = 10)
         
-        ax.text(1.060, 1.00,'Time Bins',fontsize = 10,transform = ax.transAxes)
+        ax.text(1.017, 1.00,'Time Bins (hours)',fontsize = 10,transform = ax.transAxes,ha = 'left')
         
     #### Set axis labels
     if parameter_name == 'time_interval':
-        ax.set_xlabel('Time Interval (hours)',fontsize = 14)
-        ax.set_ylabel('Frequency',fontsize = 14)
+        ax.set_xlabel('Time Interval (hours)',fontsize = 16)
+        ax.set_ylabel('Frequency',fontsize = 16)
     
     #### Set figure label
     if parameter_name == 'time_interval':
@@ -2252,7 +2306,7 @@ def PlotHistograms(marker_kinematics, parameter_name,time_within,bins = 750):
         os.makedirs(save_path+'/')   
         
     #### Save fig
-    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data with time bins.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w')
+    plt.savefig('{}\\Histogram plot for {} bins {} non zero disp marker data with time bins.png'.format(save_path,parameter_name,bins),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
 
 
 def PlotROCArbitraryParameterPerTimeBin(marker_kinematics,time_within,parameter_name,time_start,time_end):
@@ -5030,6 +5084,10 @@ def GetMarkerDataPriorA3Accel(marker_kinematics,a3_events,num_pts):
     #### Iterate through all a3_events
     for site, end in a3_events[['site','timestamp']].values:
         
+        #### Ignore PLA site
+        if site == 'PLA':
+            continue
+        
         #### Get maximum timestamp of data before a3 event
         max_timestamp = max(marker_kinematics.loc[(marker_kinematics.site_id == site) * (marker_kinematics.timestamp <= end)].timestamp.values)
 
@@ -5053,9 +5111,19 @@ def GetMarkerDataPriorA3Accel(marker_kinematics,a3_events,num_pts):
                 #### Mark non-zero initial and final velocities
                 
                 #### Construct mask
-                mask = (cur_df.velocity.shift(1) != 0) * (cur_df.velocity != 0)
+                mask = (cur_df.velocity.shift(1) != 0) * (cur_df.velocity != 0) * (cur_df.acceleration > 0)
                 
+                #### Mark mask occurrences
                 cur_df['non_zero'] = mask * 1
+                      
+                #### Create event label
+                cur_df['event'] = '{} {}'.format(site,pd.to_datetime(end).strftime("%b %d %Y"))
+                
+                #### Add a3 start label
+                cur_df['a3_start'] = pd.to_datetime(end)
+                
+                #### Add non_zero pred
+                cur_df['non_zero_pred'] = cur_df.non_zero.shift(-1).fillna(0)
                       
                 #### Append current data computation
                 marker_prior_a3 = marker_prior_a3.append(cur_df)
@@ -5065,7 +5133,7 @@ def GetMarkerDataPriorA3Accel(marker_kinematics,a3_events,num_pts):
     
     return marker_prior_a3
     
-def PlotHistogramAccelerationBeforeA3(marker_prior_a3,bins):
+def PlotHistogramAccelerationBeforeA3(marker_prior_a3):
     '''
     Histogram plot of acceleration before A3 events
     
@@ -5082,18 +5150,178 @@ def PlotHistogramAccelerationBeforeA3(marker_prior_a3,bins):
     None
     '''
     
-    #### 
-    marker_prior_a3.loc[(marker_prior_a3.non_zero == 1) * (marker_prior_a3.acceleration > 0)].dropna()
+    #### Get time interval between a3_start and timestamp of data
+    marker_prior_a3['lead_time'] = marker_prior_a3['a3_start'] - marker_prior_a3['timestamp']
     
-    return marker_prior_a3
+    #### Group data frame according to event extract
+    marker_prior_group = marker_prior_a3.dropna().groupby('event')
+
+    #######################################################
+    ##### Plot non zero vel and accel  > 0 percentages ####
+    #######################################################
     
+    #### Plot percentage graph
+    ax = marker_prior_group.apply(lambda x:np.sum(x)/float(len(x)))['non_zero'].plot.bar(color = dyna_colors[1])
+    
+    #### Get current figure
+    fig = plt.gcf()
+    
+    #### Rotate xticks
+    plt.xticks(rotation = 60,fontsize = 10, ha = 'right')
+    
+    #### Set y labels and figure title
+    ax.set_xlabel('Alert 3 Event',fontsize = 14)
+    ax.set_ylabel('Percentage',fontsize = 14)
+    fig.suptitle('Non zero acceleration with non zero velocities',fontsize = 15)
+    
+    #### Remove legend
+    ax.legend().set_visible(False)
+    
+    #### Set fig size
+    fig.set_figheight(7.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\Alert 3 Events\\".format(data_path)
+    
+    #### Create save path if not exists
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
 
+    #### Save fig
+    plt.savefig('{}\Non zero accel vel.png'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #### Close fig
+    plt.close()
+    
+    ####################################
+    ##### Plot lead times before a3 ####
+    ####################################
+    
+    #### Get non-zero vel non zero accel
+    marker_non_zero = marker_prior_a3[marker_prior_a3.non_zero == 1]
+    
+    #### Group according event
+    marker_non_zero_group = marker_non_zero.dropna().groupby('event')
 
+    ##### Plot maximum lead time
+    ax = (marker_non_zero_group.max()['lead_time'] / np.timedelta64(1,'h') ).plot.bar(color = dyna_colors[0])
+    
+    #### Get current figure
+    fig = plt.gcf()
+    
+    #### Rotate xticks
+    plt.xticks(rotation = 60,fontsize = 10, ha = 'right')
+    
+    #### Set ylim
+    ax.set_ylim([0,72])
+    
+    #### Set y labels and figure title
+    ax.set_xlabel('Alert 3 Event',fontsize = 14)
+    ax.set_ylabel('Time',fontsize = 14)
+    fig.suptitle('Alert 3 Lead Times',fontsize = 15)
+    
+    #### Remove legend
+    ax.legend().set_visible(False)
+    
+    #### Set fig size
+    fig.set_figheight(7.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\Alert 3 Events\\".format(data_path)
+    
+    #### Create save path if not exists
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
 
+    #### Save fig
+    plt.savefig('{}\Lead times.png'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #### Close fig
+    plt.close()
+    
+    ##################################
+    #### Plot true positive rates ####
+    ##################################
+    
+    #### Get non-zero vel non zero accel
+    marker_non_zero_pred = marker_prior_a3[marker_prior_a3.non_zero_pred == 1]
 
+    #### Group according event
+    marker_non_zero_pred_group = marker_non_zero_pred[['event','opt_predictions']].groupby('event')
+    
+    ##### Plot true positive rates
+    ax = marker_non_zero_pred_group['opt_predictions'].apply(lambda x:np.sum(x)/float(len(x))).plot.bar(color = dyna_colors[1])
+    
+    #### Get current figure
+    fig = plt.gcf()
+    
+    #### Rotate xticks
+    plt.xticks(rotation = 60,fontsize = 10, ha = 'right')
+    
+    #### Set y labels and figure title
+    ax.set_xlabel('Alert 3 Event',fontsize = 14)
+    ax.set_ylabel('True Positive Rate',fontsize = 14)
+    fig.suptitle('Optimal threshold true positive rates',fontsize = 15)
+    
+    #### Remove legend
+    ax.legend().set_visible(False)
+    
+    #### Set fig size
+    fig.set_figheight(7.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\Alert 3 Events\\".format(data_path)
+    
+    #### Create save path if not exists
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
 
+    #### Save fig
+    plt.savefig('{}\True positive rates.png'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #### Close fig
+    plt.close()
+    
+    #######################################
+    #### Plot exceedances on a3 events ####
+    #######################################
 
+    #### Plot percentage graph
+    ax = marker_prior_group['opt_predictions'].apply(lambda x:np.sum(x)/float(len(x))).plot.bar(color = dyna_colors[1])
+    
+    #### Get current figure
+    fig = plt.gcf()
+    
+    #### Rotate xticks
+    plt.xticks(rotation = 60,fontsize = 10, ha = 'right')
+    
+    #### Set y labels and figure title
+    ax.set_xlabel('Alert 3 Event',fontsize = 14)
+    ax.set_ylabel('Percentage',fontsize = 14)
+    fig.suptitle('Optimal predictions exceedances',fontsize = 15)
+    
+    #### Remove legend
+    ax.legend().set_visible(False)
+    
+    #### Set fig size
+    fig.set_figheight(7.5)
+    fig.set_figwidth(13)
+    
+    #### Set save path
+    save_path = "{}\Alert 3 Events\\".format(data_path)
+    
+    #### Create save path if not exists
+    if not os.path.exists(save_path+'\\'):
+        os.makedirs(save_path+'\\')    
 
+    #### Save fig
+    plt.savefig('{}\Opt predictions exceedances.png'.format(save_path),dpi = 320,facecolor='w', edgecolor='w',orientation='landscape',mode='w',bbox_inches = 'tight')
+    
+    #### Close fig
+    plt.close()
 
     
     
