@@ -20,7 +20,7 @@ from mpl_toolkits.axes_grid.inset_locator import inset_axes
 from matplotlib.legend_handler import HandlerLine2D
 from matplotlib import transforms
 #### Include Analysis folder of updews-pycodes (HARD CODED!!)
-path = os.path.abspath("D:\Leo\Dynaslope\Data Analysis\updews-pycodes\Analysis")
+path = os.path.abspath("D:\Meryll\updews-pycodes\Analysis")
 if not path in sys.path:
     sys.path.insert(1,path)
 del path 
